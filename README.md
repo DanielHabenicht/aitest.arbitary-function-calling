@@ -1,15 +1,35 @@
 # Secure Backend Service for JavaScript Code Execution
 
-A secure backend service built with Python, FastAPI that executes user-defined JavaScript code in a V8 sandbox using PyMiniRacer.
+Three implementations of a secure backend service for executing user-defined JavaScript code in isolated sandboxes:
+
+1. **Python FastAPI** - Using PyMiniRacer (V8 engine)
+2. **Node.js Fastify** - Using QuickJS WebAssembly  
+3. **Rust Actix-web** - Using Rust performance with HTTP support
+
+All implementations expose the same REST API and support the same features.
+
+## Repository Structure
+
+```
+.
+├── python-fastapi/      # Python FastAPI implementation
+├── nodejs-fastify/      # Node.js Fastify implementation  
+├── rust-actix/          # Rust Actix-web implementation
+├── wiremock/            # Preconfigured WireMock mappings
+├── benchmark.py         # Comprehensive benchmarking script
+├── benchmark.sh         # Quick benchmark script
+└── docker-compose.yml   # Run all services together
+```
 
 ## Features
 
-- **Secure Execution**: Uses PyMiniRacer (V8 engine) to run user code in an isolated sandbox
+- **Secure Execution**: Code runs in isolated sandboxes (V8/QuickJS)
 - **HTTP Support**: Provides `httpGet()` function for making web requests from user code
 - **Input Injection**: Inject custom data as `INPUTS` global variable
-- **Fast API**: Built on FastAPI for high performance and automatic API documentation
-- **Containerized**: Includes Dockerfile and docker-compose.yml with WireMock for testing
-- **WireMock Integration**: Preconfigured mock API endpoints for local development
+- **Multi-Implementation**: Compare performance across Python, Node.js, and Rust
+- **Containerized**: Docker and docker-compose.yml for easy deployment
+- **WireMock Integration**: Preconfigured mock API endpoints for local testing
+- **Benchmarking**: Comprehensive performance comparison tools
 
 ## API
 
@@ -49,63 +69,96 @@ Health check endpoint.
 
 Response: `{"status": "ok"}`
 
-## Development
+## Quick Start with Docker Compose
 
-### Prerequisites
-
-- Python 3.11+
-- pip
-
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Start Server
-
-```bash
-python -m uvicorn src.main:app --host 0.0.0.0 --port 3000 --reload
-```
-
-The server will start on `http://0.0.0.0:3000` by default.
-
-### API Documentation
-
-FastAPI automatically generates interactive API documentation:
-- Swagger UI: http://localhost:3000/docs
-- ReDoc: http://localhost:3000/redoc
-
-### Environment Variables
-
-- `PORT`: Server port (default: 3000)
-
-## Docker & Docker Compose
-
-### Using Docker Compose (Recommended)
-
-The easiest way to run the service with WireMock:
+Start all three implementations plus WireMock:
 
 ```bash
 docker-compose up
 ```
 
 This starts:
-- JavaScript execution service on port 3000
-- WireMock server with preconfigured mappings on port 8080
+- **Python service** on port 3000
+- **Node.js service** on port 3001  
+- **Rust service** on port 3002
+- **WireMock** on port 8080
 
-### Build and Run with Docker
+## Individual Service Setup
+
+Each implementation has its own directory with specific setup instructions:
+
+### Python FastAPI (Port 3000)
+```bash
+cd python-fastapi
+pip install -r requirements.txt
+python -m uvicorn src.main:app --host 0.0.0.0 --port 3000
+```
+
+### Node.js Fastify (Port 3001)
+```bash
+cd nodejs-fastify
+npm install
+npm run build
+npm start
+```
+
+### Rust Actix-web (Port 3002)
+```bash
+cd rust-actix
+cargo build --release
+cargo run --release
+```
+
+See individual README files in each directory for more details.
+
+## Benchmarking
+
+Compare performance across all three implementations:
+
+### Comprehensive Benchmark (Python script)
 
 ```bash
-docker build -t js-execution-service .
-docker run -p 3000:3000 js-execution-service
+# Start all services first
+docker-compose up -d
+
+# Run benchmark
+python3 benchmark.py
 ```
+
+This runs:
+- Sequential requests (50 per test case)
+- Concurrent requests (100 requests, 10 concurrent)
+- Multiple test cases (arithmetic, strings, arrays, complex calculations)
+- Generates detailed statistics (mean, median, min, max, RPS, throughput)
+
+### Quick Benchmark (Shell script)
+
+```bash
+# Start all services first  
+docker-compose up -d
+
+# Run quick benchmark
+./benchmark.sh
+```
+
+Simple benchmark with 10 requests per service.
+
+## Performance Comparison
+
+Each implementation has different characteristics:
+
+- **Python FastAPI**: Easy development, good performance, excellent ecosystem
+- **Node.js Fastify**: Fast, native JavaScript execution, mature QuickJS sandbox
+- **Rust Actix-web**: Maximum performance, lowest memory footprint, type safety
+
+Run the benchmarks to see actual performance metrics for your use case.
 
 ## Security
 
-- Code is executed in a V8 sandbox using PyMiniRacer
-- Isolated execution environment with no access to Python APIs or file system
+- Code is executed in isolated sandboxes (V8 for Python, QuickJS for Node.js)
+- No access to host APIs or file system from user code
 - HTTP requests are proxied through the host with timeout protection
+- All implementations passed CodeQL security scans
 
 ## Testing with WireMock
 

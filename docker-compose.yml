@@ -1,11 +1,35 @@
 version: '3.8'
 
 services:
-  # JavaScript execution service
-  app:
-    build: .
+  # Python FastAPI implementation
+  python-service:
+    build: ./python-fastapi
     ports:
       - "3000:3000"
+    depends_on:
+      - wiremock
+    networks:
+      - app-network
+    environment:
+      - PORT=3000
+
+  # Node.js Fastify implementation
+  nodejs-service:
+    build: ./nodejs-fastify
+    ports:
+      - "3001:3000"
+    depends_on:
+      - wiremock
+    networks:
+      - app-network
+    environment:
+      - PORT=3000
+
+  # Rust Actix-web implementation
+  rust-service:
+    build: ./rust-actix
+    ports:
+      - "3002:3000"
     depends_on:
       - wiremock
     networks:
