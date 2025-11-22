@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/api/users"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": [
+      {
+        "id": 1,
+        "name": "John Doe",
+        "email": "john@example.com"
+      },
+      {
+        "id": 2,
+        "name": "Jane Smith",
+        "email": "jane@example.com"
+      }
+    ]
+  }
+}

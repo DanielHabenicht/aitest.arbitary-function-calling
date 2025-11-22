@@ -1,32 +1,29 @@
-# Use Node.js LTS version with support for native fetch
-FROM node:20-alpine
+# Use Python 3.11 slim image
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Install system dependencies required for py-mini-racer
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install all dependencies
-RUN npm ci
+# Copy requirements file
+COPY requirements.txt .
 
-# Copy TypeScript config and source code
-COPY tsconfig.json ./
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
 COPY src ./src
-
-# Build TypeScript
-RUN npm run build
-
-# Remove dev dependencies to reduce image size
-RUN npm prune --production
 
 # Expose port
 EXPOSE 3000
 
 # Set environment variables
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=3000
+ENV PYTHONUNBUFFERED=1
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "3000"]

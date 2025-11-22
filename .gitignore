@@ -1,5 +1,25 @@
-node_modules/
-dist/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Logs
 *.log
+
+# Environment
 .env
+
+# OS
 .DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

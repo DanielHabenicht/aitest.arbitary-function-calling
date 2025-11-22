@@ -1,44 +1,35 @@
 # Testing with WireMock
 
-This directory contains tests that use WireMock to mock external HTTP APIs, enabling local development and testing without dependencies on third-party services.
+This directory contains documentation for using WireMock to mock external HTTP APIs, enabling local development and testing without dependencies on third-party services.
 
-## Prerequisites
+## Quick Start with Docker Compose
 
-### Install WireMock Standalone
-
-Download WireMock standalone JAR:
+The easiest way to test with WireMock:
 
 ```bash
-curl -O https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/3.3.1/wiremock-standalone-3.3.1.jar
+# From project root
+docker-compose up
 ```
 
-### Start WireMock Server
+This automatically starts:
+- JavaScript execution service on port 3000
+- WireMock server with preconfigured mappings on port 8080
 
-Start WireMock on port 8080:
+## Preconfigured Mappings
 
-```bash
-java -jar wiremock-standalone-3.3.1.jar --port 8080
-```
+The following mappings are available in `wiremock/mappings/`:
 
-Or use Docker:
+### GET /api/todos/{id}
+Returns a todo item with dynamic ID.
 
-```bash
-docker run -it --rm -p 8080:8080 wiremock/wiremock:3.3.1
-```
+### GET /api/users
+Returns a list of users.
 
-## Running Tests
+### GET /api/data
+Returns sample data with message and value.
 
-With WireMock running:
-
-```bash
-npm test
-```
-
-Or in watch mode:
-
-```bash
-npm run test:watch
-```
+### POST /api/data
+Creates data (returns success response).
 
 ## Manual Testing with WireMock
 

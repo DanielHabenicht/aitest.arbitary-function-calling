@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # JavaScript execution service
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      - wiremock
+    networks:
+      - app-network
+    environment:
+      - PORT=3000
+
+  # WireMock server with preconfigured mappings
+  wiremock:
+    image: wiremock/wiremock:3.3.1
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings
+      - ./wiremock/__files:/home/wiremock/__files
+    networks:
+      - app-network
+    command: 
+      - --global-response-templating
+      - --verbose
+
+networks:
+  app-network:
+    driver: bridge

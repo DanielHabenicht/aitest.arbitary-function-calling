@@ -1,14 +1,15 @@
 # Secure Backend Service for JavaScript Code Execution
 
-A secure backend service built with Node.js, Fastify, and TypeScript that executes user-defined JavaScript code in a WebAssembly sandbox using QuickJS.
+A secure backend service built with Python, FastAPI that executes user-defined JavaScript code in a V8 sandbox using PyMiniRacer.
 
 ## Features
 
-- **Secure Execution**: Uses `quickjs-emscripten` to run user code in an isolated WebAssembly sandbox
+- **Secure Execution**: Uses PyMiniRacer (V8 engine) to run user code in an isolated sandbox
 - **HTTP Support**: Provides `httpGet()` function for making web requests from user code
 - **Input Injection**: Inject custom data as `INPUTS` global variable
-- **Fast API**: Built on Fastify for high performance
-- **Containerized**: Includes Dockerfile for easy deployment
+- **Fast API**: Built on FastAPI for high performance and automatic API documentation
+- **Containerized**: Includes Dockerfile and docker-compose.yml with WireMock for testing
+- **WireMock Integration**: Preconfigured mock API endpoints for local development
 
 ## API
 
@@ -52,94 +53,116 @@ Response: `{"status": "ok"}`
 
 ### Prerequisites
 
-- Node.js 20+ (for native fetch support)
-- npm
+- Python 3.11+
+- pip
 
 ### Install Dependencies
 
 ```bash
-npm install
-```
-
-### Build
-
-```bash
-npm run build
+pip install -r requirements.txt
 ```
 
 ### Start Server
 
 ```bash
-npm start
+python -m uvicorn src.main:app --host 0.0.0.0 --port 3000 --reload
 ```
 
 The server will start on `http://0.0.0.0:3000` by default.
 
+### API Documentation
+
+FastAPI automatically generates interactive API documentation:
+- Swagger UI: http://localhost:3000/docs
+- ReDoc: http://localhost:3000/redoc
+
 ### Environment Variables
 
 - `PORT`: Server port (default: 3000)
-- `HOST`: Server host (default: 0.0.0.0)
-- `NODE_ENV`: Environment mode (default: development)
 
-## Docker
+## Docker & Docker Compose
 
-### Build Image
+### Using Docker Compose (Recommended)
+
+The easiest way to run the service with WireMock:
+
+```bash
+docker-compose up
+```
+
+This starts:
+- JavaScript execution service on port 3000
+- WireMock server with preconfigured mappings on port 8080
+
+### Build and Run with Docker
 
 ```bash
 docker build -t js-execution-service .
-```
-
-### Run Container
-
-```bash
 docker run -p 3000:3000 js-execution-service
 ```
 
 ## Security
 
-- Code is executed in a WebAssembly sandbox using QuickJS
-- Execution timeout of 10 seconds to prevent infinite loops
-- No access to Node.js APIs or file system from user code
-- HTTP requests are  proxied through the host
+- Code is executed in a V8 sandbox using PyMiniRacer
+- Isolated execution environment with no access to Python APIs or file system
+- HTTP requests are proxied through the host with timeout protection
 
-## Testing
+## Testing with WireMock
 
-The service includes comprehensive test infrastructure with WireMock for local development without dependencies on third-party APIs.
+The service includes WireMock integration with preconfigured mappings for local development.
 
-### Running Tests
+### Using Docker Compose (Recommended)
 
+Start both services:
 ```bash
-npm test
+docker-compose up
 ```
 
-### Manual Testing with WireMock
+### Preconfigured Mock Endpoints
 
-1. Start WireMock:
-```bash
-docker run -it --rm -p 8080:8080 wiremock/wiremock:3.3.1
-```
+The following endpoints are available in WireMock:
 
-2. Set up a mock endpoint:
-```bash
-curl -X POST http://localhost:8080/__admin/mappings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request": {"method": "GET", "url": "/api/data"},
-    "response": {
-      "status": 200,
-      "jsonBody": {"message": "Hello from WireMock!"}
-    }
-  }'
-```
+- `GET /api/todos/{id}` - Returns a todo item
+- `GET /api/users` - Returns a list of users  
+- `GET /api/data` - Returns sample data with message and value
+- `POST /api/data` - Creates data (returns success message)
 
-3. Test the service:
+### Example Test
+
 ```bash
+# Test with WireMock endpoint
 curl -X POST http://localhost:3000/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "const response = httpGet(\"http://localhost:8080/api/data\"); response.data.message",
+    "code": "const response = httpGet(\"http://wiremock:8080/api/data\"); response.data.message",
     "inputs": {}
   }'
+```
+
+Expected response:
+```json
+{
+  "result": "Hello from WireMock!"
+}
+```
+
+### Adding Custom WireMock Mappings
+
+Add JSON files to `wiremock/mappings/` directory. Example:
+
+```json
+{
+  "request": {
+    "method": "GET",
+    "url": "/api/custom"
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "custom": "data"
+    }
+  }
+}
 ```
 
 For more details, see the [tests/README.md](tests/README.md) file.
