@@ -8,18 +8,37 @@ env/
 venv/
 ENV/
 .venv
+.pytest_cache/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+build/
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
 
 # Logs
 *.log
 
 # Environment
 .env
+.env.local
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.swn
