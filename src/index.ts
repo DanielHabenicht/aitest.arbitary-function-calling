@@ -10,9 +10,12 @@ interface ExecuteRequest {
   inputs: Record<string, any>;
 }
 
-// Store for fetch promises that can be awaited
-const fetchPromises = new Map<string, Promise<any>>();
-let fetchIdCounter = 0;
+// Helper to inject JavaScript object into QuickJS VM
+function injectObject(vm: any, name: string, obj: any) {
+  const handle = vm.unwrapResult(vm.evalCode(`(${JSON.stringify(obj)})`));
+  vm.setProp(vm.global, name, handle);
+  handle.dispose();
+}
 
 // Helper to perform fetch and return serialized result
 async function performFetch(url: string, options: any = {}): Promise<any> {
@@ -77,9 +80,7 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
 
     try {
       // Inject INPUTS as a global variable
-      const inputsHandle = vm.unwrapResult(vm.evalCode(`(${JSON.stringify(inputs)})`));
-      vm.setProp(vm.global, 'INPUTS', inputsHandle);
-      inputsHandle.dispose();
+      injectObject(vm, 'INPUTS', inputs);
 
       // Provide a simple httpGet function that returns data synchronously
       // It works by taking a URL and returning the fetched data
@@ -152,9 +153,7 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       const vm2 = QuickJS2.newContext();
 
       // Re-inject INPUTS
-      const inputsHandle2 = vm2.unwrapResult(vm2.evalCode(`(${JSON.stringify(inputs)})`));
-      vm2.setProp(vm2.global, 'INPUTS', inputsHandle2);
-      inputsHandle2.dispose();
+      injectObject(vm2, 'INPUTS', inputs);
 
       // Create httpGet that returns actual results
       const httpGetFinalFn = vm2.newFunction('httpGet', (urlHandle, optionsHandle) => {
