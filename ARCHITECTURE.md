@@ -102,15 +102,16 @@
 │  ┌─────────────────────────────────┐ │
 │  │   POST /execute                 │ │
 │  │   - Receives code + inputs      │ │
-│  │   - Simplified execution        │ │
-│  │   - HTTP support ready          │ │
+│  │   - First pass: discover HTTP   │ │
+│  │   - Execute HTTP requests       │ │
+│  │   - Second pass: with results   │ │
 │  └─────────────────────────────────┘ │
 │                                       │
 │  ┌─────────────────────────────────┐ │
-│  │   Simplified JS Execution       │ │
-│  │   - Placeholder for V8          │ │
-│  │   - Type-safe API               │ │
-│  │   - Future: rusty_v8            │ │
+│  │   rquickjs (QuickJS)            │ │
+│  │   - Full JavaScript support     │ │
+│  │   - INPUTS injection            │ │
+│  │   - httpGet() function          │ │
 │  └─────────────────────────────────┘ │
 │                                       │
 │  ┌─────────────────────────────────┐ │
@@ -328,7 +329,7 @@ Rust:     docker run -p 3002:3000 rust-js-service
 |-------|--------|---------|------|
 | **Web Framework** | FastAPI | Fastify | Actix-web |
 | **Runtime** | CPython 3.11+ | Node.js 20+ | Native |
-| **JS Engine** | PyMiniRacer (V8) | QuickJS | Placeholder |
+| **JS Engine** | PyMiniRacer (V8) | QuickJS | rquickjs (QuickJS) |
 | **Async** | asyncio | Event loop | Tokio |
 | **HTTP Client** | httpx | fetch | reqwest |
 | **Serialization** | Pydantic | TypeScript | Serde |

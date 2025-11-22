@@ -8,7 +8,7 @@ Detailed comparison of the three implementations.
 |---------|---------------|-----------------|----------------|
 | **Language** | Python 3.11+ | TypeScript/Node.js 20+ | Rust 1.75+ |
 | **Framework** | FastAPI | Fastify | Actix-web |
-| **JS Engine** | PyMiniRacer (V8) | QuickJS (WebAssembly) | Simplified (HTTP only) |
+| **JS Engine** | PyMiniRacer (V8) | QuickJS (WebAssembly) | rquickjs (QuickJS) |
 | **Async Model** | async/await (asyncio) | async/await (event loop) | async/await (Tokio) |
 | **Port** | 3000 | 3001 | 3002 |
 
@@ -84,8 +84,8 @@ Detailed comparison of the three implementations.
 **Cons:**
 - ❌ Steeper learning curve
 - ❌ Longer development time
-- ❌ Limited JS engine integration (simplified in this demo)
 - ❌ Smaller ecosystem compared to Python/Node
+- ❌ Longer compile times
 
 **Best For:**
 - Maximum performance requirements
@@ -113,8 +113,8 @@ All implementations are relatively similar in complexity.
 | POST /execute | ✅ | ✅ | ✅ |
 | GET /health | ✅ | ✅ | ✅ |
 | INPUTS injection | ✅ | ✅ | ✅ |
-| httpGet() support | ✅ Full | ✅ Full | ⚠️ Simplified |
-| Two-pass execution | ✅ | ✅ | ⚠️ Partial |
+| httpGet() support | ✅ Full | ✅ Full | ✅ Full |
+| Two-pass execution | ✅ | ✅ | ✅ |
 | Timeout protection | ✅ | ✅ | ✅ |
 | Error handling | ✅ | ✅ | ✅ |
 | JSON serialization | ✅ | ✅ | ✅ |
