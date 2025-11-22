@@ -112,8 +112,9 @@ def create_context_with_http_support(
     """
     ctx = MiniRacer()
     
-    # Inject INPUTS
-    ctx.eval(f"var INPUTS = {json.dumps(inputs)};")
+    # Safely inject INPUTS using proper JSON serialization
+    inputs_json = json.dumps(inputs)
+    ctx.eval(f"var INPUTS = JSON.parse('{inputs_json.replace("'", "\\'")}');")
     
     # Track HTTP requests if no results provided
     if http_results is None:
@@ -126,8 +127,9 @@ def create_context_with_http_support(
             }
         """)
     else:
-        # Second pass - return cached results
-        ctx.eval(f"var __httpResults = {json.dumps(http_results)};")
+        # Second pass - return cached results using safe injection
+        results_json = json.dumps(http_results)
+        ctx.eval(f"var __httpResults = JSON.parse('{results_json.replace("'", "\\'")}');")
         ctx.eval("""
             var __httpRequestIndex = 0;
             function httpGet(url, options) {
@@ -203,7 +205,12 @@ async def execute_code(request: ExecuteRequest):
         finally:
             del ctx2
     
+    except HTTPException:
+        raise
     except Exception as e:
+        # Log the full error for debugging
+        import logging
+        logging.error(f"Code execution error: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={"error": "Execution failed", "message": str(e)}
