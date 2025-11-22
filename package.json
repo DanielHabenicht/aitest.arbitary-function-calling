@@ -1,0 +1,28 @@
+{
+  "name": "aitest-arbitrary-function-calling",
+  "version": "1.0.0",
+  "description": "Secure backend service for executing user-defined JavaScript code",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "fastify",
+    "quickjs",
+    "sandbox",
+    "code-execution"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "fastify": "^4.25.2",
+    "quickjs-emscripten": "^0.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3"
+  }
+}
