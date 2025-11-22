@@ -18,7 +18,10 @@ All implementations expose the same REST API and support the same features.
 ├── wiremock/            # Preconfigured WireMock mappings
 ├── benchmark.py         # Comprehensive benchmarking script
 ├── benchmark.sh         # Quick benchmark script
-└── docker-compose.yml   # Run all services together
+├── docker-compose.yml   # Run all services together
+├── COMPARISON.md        # Detailed comparison of implementations
+├── BENCHMARKING.md      # Benchmarking guide
+└── QUICKSTART.md        # Quick start guide
 ```
 
 ## Features
@@ -152,6 +155,8 @@ Each implementation has different characteristics:
 - **Rust Actix-web**: Maximum performance, lowest memory footprint, type safety
 
 Run the benchmarks to see actual performance metrics for your use case.
+
+**See [COMPARISON.md](COMPARISON.md) for detailed comparison and [BENCHMARKING.md](BENCHMARKING.md) for benchmarking guide.**
 
 ## Security
 
