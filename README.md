@@ -104,7 +104,45 @@ docker run -p 3000:3000 js-execution-service
 
 ## Testing
 
-The service includes test infrastructure with WireMock for local development without dependencies on third-party APIs. See the `tests/` directory for examples.
+The service includes comprehensive test infrastructure with WireMock for local development without dependencies on third-party APIs.
+
+### Running Tests
+
+```bash
+npm test
+```
+
+### Manual Testing with WireMock
+
+1. Start WireMock:
+```bash
+docker run -it --rm -p 8080:8080 wiremock/wiremock:3.3.1
+```
+
+2. Set up a mock endpoint:
+```bash
+curl -X POST http://localhost:8080/__admin/mappings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": {"method": "GET", "url": "/api/data"},
+    "response": {
+      "status": 200,
+      "jsonBody": {"message": "Hello from WireMock!"}
+    }
+  }'
+```
+
+3. Test the service:
+```bash
+curl -X POST http://localhost:3000/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "const response = httpGet(\"http://localhost:8080/api/data\"); response.data.message",
+    "inputs": {}
+  }'
+```
+
+For more details, see the [tests/README.md](tests/README.md) file.
 
 ## API Functions Available in User Code
 
