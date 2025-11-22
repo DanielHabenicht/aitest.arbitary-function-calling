@@ -1,0 +1,114 @@
+name: Run Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of benchmark to run'
+        required: true
+        default: 'comprehensive'
+        type: choice
+        options:
+          - comprehensive
+          - quick
+      iterations:
+        description: 'Number of iterations (comprehensive only)'
+        required: false
+        default: '50'
+        type: string
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      
+      - name: Start services with Docker Compose
+        run: |
+          docker compose up -d
+          echo "Waiting for services to be ready..."
+          sleep 30
+      
+      - name: Check service health
+        run: |
+          echo "Checking Python service..."
+          curl -f http://localhost:3000/health || exit 1
+          echo "Checking Node.js service..."
+          curl -f http://localhost:3001/health || exit 1
+          echo "Checking Rust service..."
+          curl -f http://localhost:3002/health || exit 1
+          echo "Checking WireMock service..."
+          curl -f http://localhost:8080/__admin/mappings || exit 1
+          echo "All services are healthy!"
+      
+      - name: Run Quick Benchmark
+        if: inputs.test_type == 'quick'
+        run: |
+          chmod +x benchmark.sh
+          ./benchmark.sh
+      
+      - name: Run Comprehensive Benchmark
+        if: inputs.test_type == 'comprehensive'
+        run: |
+          python benchmark.py
+        env:
+          BENCHMARK_ITERATIONS: ${{ inputs.iterations }}
+      
+      - name: Test WireMock Integration
+        run: |
+          echo "Testing WireMock integration with Python service..."
+          curl -X POST http://localhost:3000/execute \
+            -H "Content-Type: application/json" \
+            -d '{"code": "const data = httpGet(\"http://wiremock:8080/api/data\"); data.data.message", "inputs": {}}' \
+            | tee python_wiremock_result.json
+          
+          echo "Testing WireMock integration with Node.js service..."
+          curl -X POST http://localhost:3001/execute \
+            -H "Content-Type: application/json" \
+            -d '{"code": "const data = httpGet(\"http://wiremock:8080/api/data\"); data.data.message", "inputs": {}}' \
+            | tee nodejs_wiremock_result.json
+          
+          echo "Testing WireMock integration with Rust service..."
+          curl -X POST http://localhost:3002/execute \
+            -H "Content-Type: application/json" \
+            -d '{"code": "const data = httpGet(\"http://wiremock:8080/api/data\"); data.data.message", "inputs": {}}' \
+            | tee rust_wiremock_result.json
+      
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_number }}
+          path: |
+            *.json
+            *.log
+          retention-days: 30
+      
+      - name: Display service logs on failure
+        if: failure()
+        run: |
+          echo "=== Python Service Logs ==="
+          docker compose logs python-service
+          echo "=== Node.js Service Logs ==="
+          docker compose logs nodejs-service
+          echo "=== Rust Service Logs ==="
+          docker compose logs rust-service
+          echo "=== WireMock Service Logs ==="
+          docker compose logs wiremock
+      
+      - name: Stop services
+        if: always()
+        run: |
+          docker compose down -v

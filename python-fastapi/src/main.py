@@ -3,6 +3,7 @@ Secure JavaScript code execution service using FastAPI and PyMiniRacer.
 """
 import json
 import asyncio
+import base64
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 
@@ -112,9 +113,8 @@ def create_context_with_http_support(
     """
     ctx = MiniRacer()
     
-    # Safely inject INPUTS using proper JSON serialization
-    inputs_json = json.dumps(inputs)
-    ctx.eval(f"var INPUTS = JSON.parse('{inputs_json.replace("'", "\\'")}');")
+    # Safely inject INPUTS by passing it directly to the context
+    ctx.eval("var INPUTS = " + json.dumps(inputs))
     
     # Track HTTP requests if no results provided
     if http_results is None:
@@ -127,13 +127,13 @@ def create_context_with_http_support(
             }
         """)
     else:
-        # Second pass - return cached results using safe injection
-        results_json = json.dumps(http_results)
-        ctx.eval(f"var __httpResults = JSON.parse('{results_json.replace("'", "\\'")}');")
+        # Second pass - return cached results by passing directly
+        ctx.eval("var __httpResults = " + json.dumps(http_results))
         ctx.eval("""
             var __httpRequestIndex = 0;
             function httpGet(url, options) {
-                var key = JSON.stringify({ url: url, options: options || {} });
+                // Sort keys to match Python's sort_keys=True
+                var key = JSON.stringify({ options: options || {}, url: url });
                 return __httpResults[key];
             }
         """)
@@ -190,10 +190,10 @@ async def execute_code(request: ExecuteRequest):
         ]
         results = await asyncio.gather(*tasks)
         
-        # Create results map
+        # Create results map with consistent key ordering
         http_results = {}
         for req, result in zip(http_requests, results):
-            key = json.dumps({'url': req['url'], 'options': req.get('options', {})})
+            key = json.dumps({'url': req['url'], 'options': req.get('options', {})}, sort_keys=True)
             http_results[key] = result
         
         # Second pass: Execute with cached HTTP results
