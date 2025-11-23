@@ -8,11 +8,11 @@
 │                                                                   │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
 │  │   Python     │  │   Node.js    │  │     Rust     │          │
-│  │   FastAPI    │  │   Fastify    │  │   Actix-web  │          │
+│  │   FastAPI    │  │   Fastify    │  │     Axum     │          │
 │  │              │  │              │  │              │          │
 │  │  Port 3000   │  │  Port 3001   │  │  Port 3002   │          │
 │  │              │  │              │  │              │          │
-│  │ PyMiniRacer  │  │   QuickJS    │  │   HTTP Only  │          │
+│  │ PyMiniRacer  │  │   QuickJS    │  │  rquickjs    │          │
 │  │    (V8)      │  │  (WASM)      │  │   (Simple)   │          │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
 │         │                  │                  │                  │
@@ -92,11 +92,11 @@
 └───────────────────────────────────────┘
 ```
 
-### Rust Actix-web Service (Port 3002)
+### Rust Axum Service (Port 3002)
 
 ```
 ┌───────────────────────────────────────┐
-│      Actix-web Application            │
+│      Axum Application                 │
 ├───────────────────────────────────────┤
 │                                       │
 │  ┌─────────────────────────────────┐ │
@@ -327,10 +327,10 @@ Rust:     docker run -p 3002:3000 rust-js-service
 
 | Layer | Python | Node.js | Rust |
 |-------|--------|---------|------|
-| **Web Framework** | FastAPI | Fastify | Actix-web |
+| **Web Framework** | FastAPI | Fastify | Axum |
 | **Runtime** | CPython 3.11+ | Node.js 20+ | Native |
 | **JS Engine** | PyMiniRacer (V8) | QuickJS | rquickjs (QuickJS) |
-| **Async** | asyncio | Event loop | Tokio |
+| **Async** | asyncio | Event loop | Tokio (multi-threaded) |
 | **HTTP Client** | httpx | fetch | reqwest |
 | **Serialization** | Pydantic | TypeScript | Serde |
 | **Container Base** | python:3.11-slim | node:20-alpine | debian:bookworm-slim |

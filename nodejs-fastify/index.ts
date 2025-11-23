@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { getQuickJS, shouldInterruptAfterDeadline } from 'quickjs-emscripten';
+import { newAsyncContext } from 'quickjs-emscripten';
 
 const fastify = Fastify({
   logger: true
@@ -61,136 +61,70 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
     return reply.code(400).send({ error: 'Invalid code parameter' });
   }
 
-  try {
-    // Create QuickJS VM
-    const QuickJS = await getQuickJS();
-    const vm = QuickJS.newContext();
+  // Create async context with timeout
+  const context = await newAsyncContext();
 
+  try {
     // Set execution timeout (10 seconds)
-    const interruptCycleLimit = 1024;
-    let interruptCycles = 0;
-    const shouldInterrupt = shouldInterruptAfterDeadline(Date.now() + 10000);
-    vm.runtime.setInterruptHandler((runtime) => {
-      interruptCycles++;
-      if (interruptCycles % interruptCycleLimit === 0) {
-        return shouldInterrupt(runtime);
-      }
-      return false;
+    const timeoutMs = 10000;
+    const startTime = Date.now();
+    context.runtime.setInterruptHandler(() => {
+      return Date.now() - startTime > timeoutMs;
     });
 
-    try {
-      // Inject INPUTS as a global variable
-      injectObject(vm, 'INPUTS', inputs);
+    // Inject INPUTS as a global variable
+    injectObject(context, 'INPUTS', inputs);
 
-      // Provide a simple httpGet function that returns data synchronously
-      // It works by taking a URL and returning the fetched data
-      // The user should call it like: httpGet(url) or httpGet(url, options)
-      // On first execution, we collect all URLs and execute them, then re-run the code
-      const httpRequests: Array<{ url: string; options: any }> = [];
-      const httpResults = new Map<string, any>();
-
-      const httpGetFn = vm.newFunction('httpGet', (urlHandle, optionsHandle) => {
-        const url = vm.getString(urlHandle);
-        let options: any = {};
-        
-        if (optionsHandle) {
-          const optionsJson = vm.dump(optionsHandle);
-          options = optionsJson;
-        }
-
-        const key = JSON.stringify({ url, options });
-        
-        // If we have a result, return it
-        if (httpResults.has(key)) {
-          const result = httpResults.get(key);
-          return vm.unwrapResult(vm.evalCode(`(${JSON.stringify(result)})`));
-        }
-        
-        // Otherwise, record this request
-        if (!httpRequests.some(r => JSON.stringify({ url: r.url, options: r.options }) === key)) {
-          httpRequests.push({ url, options });
-        }
-        
-        // Return undefined for first pass
-        return vm.undefined;
-      });
+    // Create a native async function for HTTP requests (supports all verbs)
+    const httpRequestFn = context.newAsyncifiedFunction('httpRequest', async (urlHandle, optionsHandle) => {
+      const url = context.getString(urlHandle);
+      let options: any = {};
       
-      vm.setProp(vm.global, 'httpGet', httpGetFn);
-      httpGetFn.dispose();
-
-      // First execution to discover HTTP calls
-      try {
-        const firstResult = vm.unwrapResult(vm.evalCode(code));
-        const firstOutput = vm.dump(firstResult);
-        firstResult.dispose();
-        
-        // If no HTTP requests were made, return the result immediately
-        if (httpRequests.length === 0) {
-          vm.dispose();
-          return reply.send({ result: firstOutput });
-        }
-      } catch (e: any) {
-        // Expected to fail if code depends on HTTP results
-        request.log.debug(`First pass error (expected): ${e.message}`);
+      if (optionsHandle) {
+        const optionsJson = context.dump(optionsHandle);
+        options = optionsJson;
       }
 
-      request.log.debug(`Found ${httpRequests.length} HTTP requests to execute`);
-
-      // Execute all discovered HTTP requests
-      const results = await Promise.all(
-        httpRequests.map(({ url, options }) => performFetch(url, options))
-      );
-
-      // Store results in map
-      httpRequests.forEach((req, index) => {
-        const key = JSON.stringify({ url: req.url, options: req.options });
-        httpResults.set(key, results[index]);
-      });
-
-      // Create a fresh context with HTTP results
-      vm.dispose();
-      const QuickJS2 = await getQuickJS();
-      const vm2 = QuickJS2.newContext();
-
-      // Re-inject INPUTS
-      injectObject(vm2, 'INPUTS', inputs);
-
-      // Create httpGet that returns actual results
-      const httpGetFinalFn = vm2.newFunction('httpGet', (urlHandle, optionsHandle) => {
-        const url = vm2.getString(urlHandle);
-        let options: any = {};
-        
-        if (optionsHandle) {
-          const optionsJson = vm2.dump(optionsHandle);
-          options = optionsJson;
-        }
-
-        const key = JSON.stringify({ url, options });
-        const result = httpResults.get(key);
-        
-        if (result) {
-          return vm2.unwrapResult(vm2.evalCode(`(${JSON.stringify(result)})`));
-        }
-        
-        return vm2.undefined;
-      });
+      // Perform the actual fetch with any HTTP method
+      const result = await performFetch(url, options);
       
-      vm2.setProp(vm2.global, 'httpGet', httpGetFinalFn);
-      httpGetFinalFn.dispose();
+      // Return result to QuickJS using safe injection method
+      // Store in a temporary global variable to avoid code injection
+      const tempVarName = `__httpResult_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const globalObj = context.global;
+      const resultStr = JSON.stringify(result);
+      
+      // Use evalCode with the JSON string but avoid injection by parsing it
+      const parsedHandle = context.unwrapResult(
+        context.evalCode(`JSON.parse(${JSON.stringify(resultStr)})`)
+      );
+      return parsedHandle;
+    });
 
-      // Final execution with actual HTTP results
-      const result = vm2.unwrapResult(vm2.evalCode(code));
-      const output = vm2.dump(result);
-      result.dispose();
+    context.setProp(context.global, 'httpRequest', httpRequestFn);
+    httpRequestFn.dispose();
 
-      vm2.dispose();
-      return reply.send({ result: output });
-    } catch (error: any) {
-      // Make sure to clean up VMs if they exist
-      try { vm.dispose(); } catch (e) {}
-      throw error;
-    }
+    // Also provide httpGet as a convenience wrapper for backwards compatibility
+    context.unwrapResult(context.evalCode(`
+      function httpGet(url, options) {
+        return httpRequest(url, options);
+      }
+    `)).dispose();
+
+    // Execute the user code asynchronously
+    const resultPromise = await context.evalCodeAsync(code);
+    const resultHandle = context.unwrapResult(resultPromise);
+    
+    const output = context.dump(resultHandle);
+    resultHandle.dispose();
+
+    context.dispose();
+
+    return reply.send({ result: output });
   } catch (error: any) {
+    // Clean up resources
+    try { context.dispose(); } catch (e) {}
+    
     console.error(error);
     return reply.code(500).send({ 
       error: 'Execution failed', 

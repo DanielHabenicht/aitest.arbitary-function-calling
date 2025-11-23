@@ -4,7 +4,7 @@ Three implementations of a secure backend service for executing user-defined Jav
 
 1. **Python FastAPI** - Using PyMiniRacer (V8 engine)
 2. **Node.js Fastify** - Using QuickJS WebAssembly  
-3. **Rust Actix-web** - Using Rust performance with HTTP support
+3. **Rust Axum** - Using Rust performance with HTTP support
 
 All implementations expose the same REST API and support the same features.
 
@@ -14,7 +14,7 @@ All implementations expose the same REST API and support the same features.
 .
 ├── python-fastapi/      # Python FastAPI implementation
 ├── nodejs-fastify/      # Node.js Fastify implementation  
-├── rust-actix/          # Rust Actix-web implementation
+├── rust/                # Rust Axum implementation
 ├── wiremock/            # Preconfigured WireMock mappings
 ├── benchmark.py         # Comprehensive benchmarking script
 ├── benchmark.sh         # Quick benchmark script
@@ -105,9 +105,9 @@ npm run build
 npm start
 ```
 
-### Rust Actix-web (Port 3002)
+### Rust Axum (Port 3002)
 ```bash
-cd rust-actix
+cd rust
 cargo build --release
 cargo run --release
 ```

@@ -1,13 +1,13 @@
-# Rust Actix-web Implementation
+# Rust Axum Implementation
 
-Secure JavaScript code execution service using Rust, Actix-web, and rquickjs (QuickJS engine).
+Secure JavaScript code execution service using Rust, Axum, and rquickjs (QuickJS engine).
 
 ## Features
 
-- Actix-web for high performance
+- Axum for high performance and ergonomic async
 - rquickjs (QuickJS) for JavaScript execution
-- Two-pass HTTP execution model
-- Async/await with Tokio
+- Single-pass async HTTP execution model
+- Async/await with Tokio multi-threaded runtime
 - Type-safe API with Serde
 - Low memory footprint
 

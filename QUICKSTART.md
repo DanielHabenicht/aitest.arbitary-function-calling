@@ -11,7 +11,7 @@ docker-compose up
 This starts:
 - **Python FastAPI service** on http://localhost:3000
 - **Node.js Fastify service** on http://localhost:3001
-- **Rust Actix-web service** on http://localhost:3002
+- **Rust Axum service** on http://localhost:3002
 - **WireMock server** with preconfigured mappings on http://localhost:8080
 
 ## Testing the Services
@@ -119,7 +119,7 @@ Python FastAPI provides automatic documentation:
 Each implementation has its own setup. See README files in:
 - `python-fastapi/README.md`
 - `nodejs-fastify/README.md`
-- `rust-actix/README.md`
+- `rust/README.md`
 
 ### Python Development
 ```bash
@@ -139,7 +139,7 @@ npm start
 
 ### Rust Development
 ```bash
-cd rust-actix
+cd rust
 cargo build --release
 cargo run --release
 ```
