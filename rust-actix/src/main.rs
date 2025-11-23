@@ -142,10 +142,10 @@ async fn execute_js_with_quickjs(
         
         // Track HTTP requests if no results provided
         if http_results.is_none() {
-            // First pass - set up httpGet to collect requests
+            // First pass - set up httpRequest to collect requests
             let setup_code = r#"
                 var __httpRequests = [];
-                function httpGet(url, options) {
+                function httpRequest(url, options) {
                     __httpRequests.push({ url: url, options: options || {} });
                     return undefined;
                 }
@@ -153,28 +153,32 @@ async fn execute_js_with_quickjs(
             ctx.eval::<(), _>(setup_code)
                 .map_err(|e| format!("Setup error: {}", e))?;
         } else {
-            // Second pass - set up httpGet with actual results
-            let results_map: HashMap<String, Value> = http_results
-                .unwrap()
-                .iter()
-                .map(|(k, v)| {
-                    let val = serde_json::json!({
-                        "ok": v.ok,
-                        "status": v.status,
-                        "statusText": v.status_text,
-                        "headers": v.headers,
-                        "data": v.data,
-                    });
-                    (k.clone(), val)
-                })
-                .collect();
+            // Second pass - set up httpRequest with actual results
+            // Build JavaScript object directly to avoid double-escaping keys
+            ctx.eval::<(), _>("var __httpResults = {};")
+                .map_err(|e| format!("Results init error: {}", e))?;
             
-            let results_json = serde_json::to_string(&results_map).map_err(|e| e.to_string())?;
-            ctx.eval::<(), _>(format!("var __httpResults = {};", results_json))
-                .map_err(|e| format!("Results injection error: {}", e))?;
+            for (key, result) in http_results.unwrap().iter() {
+                let result_json = serde_json::json!({
+                    "ok": result.ok,
+                    "status": result.status,
+                    "statusText": result.status_text,
+                    "headers": result.headers,
+                    "data": result.data,
+                });
+                let result_str = serde_json::to_string(&result_json).map_err(|e| e.to_string())?;
+                // Use the key directly as a JavaScript object property key
+                // The key is already a JSON string like '{"url":"...","options":{}}'
+                // We want to set __httpResults[key] = result
+                // But we need to pass the key as a string, so we escape it for JavaScript
+                let escaped_key = key.replace('\\', "\\\\").replace('"', "\\\"");
+                let assign_code = format!("__httpResults[\"{}\"] = {};", escaped_key, result_str);
+                ctx.eval::<(), _>(assign_code)
+                    .map_err(|e| format!("Results assignment error: {}", e))?;
+            }
             
             let setup_code = r#"
-                function httpGet(url, options) {
+                function httpRequest(url, options) {
                     var key = JSON.stringify({ url: url, options: options || {} });
                     return __httpResults[key];
                 }
@@ -213,7 +217,7 @@ async fn extract_http_requests(code: &str, inputs: &HashMap<String, Value>) -> s
         // Set up request collection
         let setup_code = r#"
             var __httpRequests = [];
-            function httpGet(url, options) {
+            function httpRequest(url, options) {
                 __httpRequests.push({ url: url, options: options || {} });
                 return undefined;
             }
@@ -294,10 +298,12 @@ async fn execute_handler(req: web::Json<ExecuteRequest>) -> Result<HttpResponse>
     let mut http_results = HashMap::new();
     for (url, options) in http_requests {
         let result = perform_fetch(url.clone(), options.clone()).await;
-        let key = serde_json::json!({
+        // Use compact JSON format (no spaces) to match JavaScript's JSON.stringify
+        let key_obj = serde_json::json!({
             "url": url,
             "options": options.unwrap_or_default()
-        }).to_string();
+        });
+        let key = serde_json::to_string(&key_obj).unwrap_or_default();
         http_results.insert(key, result);
     }
     
