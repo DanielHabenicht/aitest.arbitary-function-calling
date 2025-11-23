@@ -6,6 +6,7 @@ import asyncio
 import base64
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
+import threading
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -102,11 +103,11 @@ def create_context_with_http_support(
     http_results: Optional[Dict[str, Any]] = None
 ) -> MiniRacer:
     """
-    Create a V8 context with INPUTS and httpGet support.
+    Create a V8 context with INPUTS and httpRequest support.
     
     Args:
         inputs: The inputs to inject
-        http_results: Optional HTTP results cache
+        http_results: Optional cached HTTP results for immediate return
     
     Returns:
         Configured MiniRacer context
@@ -116,24 +117,22 @@ def create_context_with_http_support(
     # Safely inject INPUTS by passing it directly to the context
     ctx.eval("var INPUTS = " + json.dumps(inputs))
     
-    # Track HTTP requests if no results provided
     if http_results is None:
-        # First pass - collect HTTP requests
+        # Setup to collect HTTP requests
         ctx.eval("""
             var __httpRequests = [];
-            function httpGet(url, options) {
+            function httpRequest(url, options) {
                 __httpRequests.push({ url: url, options: options || {} });
                 return undefined;
             }
         """)
     else:
-        # Second pass - return cached results by passing directly
+        # Return cached results
         ctx.eval("var __httpResults = " + json.dumps(http_results))
         ctx.eval("""
-            var __httpRequestIndex = 0;
-            function httpGet(url, options) {
-                // Sort keys to match Python's sort_keys=True
-                var key = JSON.stringify({ options: options || {}, url: url });
+            function httpRequest(url, options) {
+                // Match Python's key format with sorted keys
+                var key = JSON.stringify({ 'options': options || {}, 'url': url });
                 return __httpResults[key];
             }
         """)
@@ -148,21 +147,19 @@ async def execute_code(request: ExecuteRequest):
     
     The code can use:
     - INPUTS: Global variable containing the inputs
-    - httpGet(url, options): Function to make HTTP requests
+    - httpRequest(url, options): Function to make HTTP requests (supports all HTTP verbs)
     
-    The execution uses a two-pass model:
-    1. First pass discovers httpGet() calls
-    2. HTTP requests are executed in parallel
-    3. Second pass executes with cached HTTP results
+    Optimized execution: Collects HTTP requests on first pass, executes them, then re-runs with results.
     """
     if not request.code or not isinstance(request.code, str):
         raise HTTPException(status_code=400, detail="Invalid code parameter")
     
     try:
-        # First pass: Execute code to discover HTTP requests
+        # Create context to collect HTTP requests
         ctx = create_context_with_http_support(request.inputs)
         
         try:
+            # Try to execute - may fail if code depends on HTTP results
             result = ctx.eval(request.code)
             
             # Check if any HTTP requests were made
@@ -171,14 +168,19 @@ async def execute_code(request: ExecuteRequest):
             
             # If no HTTP requests, return result immediately
             if not http_requests:
+                # Handle JSObject by stringifying via eval
+                if hasattr(result, '__class__') and 'JSObject' in str(type(result)):
+                    escaped_code = request.code.replace('`', '\\`').replace('$', '\\$')
+                    result_json = ctx.eval(f"JSON.stringify(eval(`{escaped_code}`))")
+                    result = json.loads(result_json) if result_json else result
                 return ExecuteResponse(result=result)
-        except Exception as e:
-            # Expected to fail if code depends on HTTP results
+        except Exception:
+            # Code likely depends on HTTP results, that's okay
             http_requests_json = ctx.eval("JSON.stringify(__httpRequests)")
             http_requests = json.loads(http_requests_json)
             
-            # If no HTTP requests were discovered, this is a real error
             if not http_requests:
+                # Real error - no HTTP requests and execution failed
                 raise
         finally:
             del ctx
@@ -190,17 +192,26 @@ async def execute_code(request: ExecuteRequest):
         ]
         results = await asyncio.gather(*tasks)
         
-        # Create results map with consistent key ordering
+        # Create results map (use compact JSON without spaces to match JavaScript's JSON.stringify)
         http_results = {}
         for req, result in zip(http_requests, results):
-            key = json.dumps({'url': req['url'], 'options': req.get('options', {})}, sort_keys=True)
+            key = json.dumps({'url': req['url'], 'options': req.get('options', {})}, sort_keys=True, separators=(',', ':'))
             http_results[key] = result
         
-        # Second pass: Execute with cached HTTP results
+        # Execute with cached HTTP results
         ctx2 = create_context_with_http_support(request.inputs, http_results)
         
         try:
+            # Execute code and convert to Python
             result = ctx2.eval(request.code)
+            
+            # Handle JSObject by stringifying via eval
+            if hasattr(result, '__class__') and 'JSObject' in str(type(result)):
+                # Use eval with template literal to handle both expressions and statements
+                escaped_code = request.code.replace('`', '\\`').replace('$', '\\$')
+                result_json = ctx2.eval(f"JSON.stringify(eval(`{escaped_code}`))")
+                result = json.loads(result_json) if result_json else result
+            
             return ExecuteResponse(result=result)
         finally:
             del ctx2
