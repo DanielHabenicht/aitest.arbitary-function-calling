@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { getQuickJS, shouldInterruptAfterDeadline } from 'quickjs-emscripten';
+import { newAsyncContext } from 'quickjs-emscripten';
 
 const fastify = Fastify({
   logger: true
@@ -10,39 +10,11 @@ interface ExecuteRequest {
   inputs: Record<string, any>;
 }
 
-// JavaScript code snippets for QuickJS context
-const FIRST_PASS_SETUP = `
-  var __httpRequests = [];
-  function httpGet(url, options) {
-    __httpRequests.push({ url: url, options: options || {} });
-    return undefined;
-  }
-`;
-
-const SECOND_PASS_SETUP = `
-  function httpGet(url, options) {
-    var key = JSON.stringify({ url: url, options: options || {} });
-    return __httpResults[key];
-  }
-`;
-
 // Helper to inject JavaScript object into QuickJS VM
 function injectObject(vm: any, name: string, obj: any) {
   const handle = vm.unwrapResult(vm.evalCode(`(${JSON.stringify(obj)})`));
   vm.setProp(vm.global, name, handle);
   handle.dispose();
-}
-
-// Helper to extract HTTP requests from VM
-function extractHttpRequests(vm: any): Array<{ url: string; options: any }> {
-  try {
-    const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
-    const requestsStr = vm.getString(requestsJson);
-    requestsJson.dispose();
-    return JSON.parse(requestsStr);
-  } catch (e: any) {
-    throw new Error(`Failed to extract HTTP requests: ${e.message}`);
-  }
 }
 
 // Helper to perform fetch and return serialized result
@@ -89,97 +61,50 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
     return reply.code(400).send({ error: 'Invalid code parameter' });
   }
 
-  try {
-    // Create QuickJS VM
-    const QuickJS = await getQuickJS();
-    const vm = QuickJS.newContext();
+  // Create async context
+  const context = await newAsyncContext();
 
-    // Set execution timeout (10 seconds)
-    const interruptCycleLimit = 1024;
-    let interruptCycles = 0;
-    const shouldInterrupt = shouldInterruptAfterDeadline(Date.now() + 10000);
-    vm.runtime.setInterruptHandler((runtime) => {
-      interruptCycles++;
-      if (interruptCycles % interruptCycleLimit === 0) {
-        return shouldInterrupt(runtime);
+  try {
+    // Inject INPUTS as a global variable
+    injectObject(context, 'INPUTS', inputs);
+
+    // Create a native async function for httpGet
+    const httpGetFn = context.newAsyncifiedFunction('httpGet', async (urlHandle, optionsHandle) => {
+      const url = context.getString(urlHandle);
+      let options: any = {};
+      
+      if (optionsHandle) {
+        const optionsJson = context.dump(optionsHandle);
+        options = optionsJson;
       }
-      return false;
+
+      // Perform the actual fetch
+      const result = await performFetch(url, options);
+      
+      // Return result to QuickJS
+      const resultHandle = context.unwrapResult(
+        context.evalCode(`(${JSON.stringify(result)})`)
+      );
+      return resultHandle;
     });
 
-    let vm2: any = null;
-    try {
-      // Inject INPUTS as a global variable
-      injectObject(vm, 'INPUTS', inputs);
+    context.setProp(context.global, 'httpGet', httpGetFn);
+    httpGetFn.dispose();
 
-      // First pass: Set up httpGet to collect HTTP requests
-      const setupHandle = vm.unwrapResult(vm.evalCode(FIRST_PASS_SETUP));
-      setupHandle.dispose();
+    // Execute the user code asynchronously
+    const resultPromise = await context.evalCodeAsync(code);
+    const resultHandle = context.unwrapResult(resultPromise);
+    
+    const output = context.dump(resultHandle);
+    resultHandle.dispose();
 
-      // First execution to discover HTTP calls
-      let httpRequests: Array<{ url: string; options: any }> = [];
-      try {
-        const firstResult = vm.unwrapResult(vm.evalCode(code));
-        const firstOutput = vm.dump(firstResult);
-        firstResult.dispose();
-        
-        // Extract HTTP requests
-        httpRequests = extractHttpRequests(vm);
-        
-        // If no HTTP requests were made, return the result immediately
-        if (httpRequests.length === 0) {
-          vm.dispose();
-          return reply.send({ result: firstOutput });
-        }
-      } catch (e: any) {
-        // Expected to fail if code depends on HTTP results
-        request.log.debug(`First pass error (expected): ${e.message}`);
-        
-        // Still extract HTTP requests
-        httpRequests = extractHttpRequests(vm);
-      }
+    context.dispose();
 
-      request.log.debug(`Found ${httpRequests.length} HTTP requests to execute`);
-
-      // Execute all discovered HTTP requests
-      const results = await Promise.all(
-        httpRequests.map(({ url, options }) => performFetch(url, options))
-      );
-
-      // Build results map
-      const httpResults: Record<string, any> = {};
-      httpRequests.forEach((req, index) => {
-        const key = JSON.stringify({ url: req.url, options: req.options });
-        httpResults[key] = results[index];
-      });
-
-      // Create a fresh context with HTTP results
-      vm.dispose();
-      const QuickJS2 = await getQuickJS();
-      vm2 = QuickJS2.newContext();
-
-      // Re-inject INPUTS
-      injectObject(vm2, 'INPUTS', inputs);
-
-      // Inject HTTP results and set up httpGet to return cached results
-      injectObject(vm2, '__httpResults', httpResults);
-      const setup2Handle = vm2.unwrapResult(vm2.evalCode(SECOND_PASS_SETUP));
-      setup2Handle.dispose();
-
-      // Final execution with actual HTTP results
-      const result = vm2.unwrapResult(vm2.evalCode(code));
-      const output = vm2.dump(result);
-      result.dispose();
-
-      vm2.dispose();
-      vm2 = null;
-      return reply.send({ result: output });
-    } catch (error: any) {
-      // Make sure to clean up VMs if they exist
-      try { vm.dispose(); } catch (e) {}
-      try { if (vm2) vm2.dispose(); } catch (e) {}
-      throw error;
-    }
+    return reply.send({ result: output });
   } catch (error: any) {
+    // Clean up resources
+    try { context.dispose(); } catch (e) {}
+    
     console.error(error);
     return reply.code(500).send({ 
       error: 'Execution failed', 
