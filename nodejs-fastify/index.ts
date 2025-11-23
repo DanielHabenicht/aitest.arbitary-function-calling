@@ -82,47 +82,27 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       // Inject INPUTS as a global variable
       injectObject(vm, 'INPUTS', inputs);
 
-      // Provide a simple httpGet function that returns data synchronously
-      // It works by taking a URL and returning the fetched data
-      // The user should call it like: httpGet(url) or httpGet(url, options)
-      // On first execution, we collect all URLs and execute them, then re-run the code
-      const httpRequests: Array<{ url: string; options: any }> = [];
-      const httpResults = new Map<string, any>();
-
-      const httpGetFn = vm.newFunction('httpGet', (urlHandle, optionsHandle) => {
-        const url = vm.getString(urlHandle);
-        let options: any = {};
-        
-        if (optionsHandle) {
-          const optionsJson = vm.dump(optionsHandle);
-          options = optionsJson;
+      // First pass: Set up httpGet to collect HTTP requests
+      vm.unwrapResult(vm.evalCode(`
+        var __httpRequests = [];
+        function httpGet(url, options) {
+          __httpRequests.push({ url: url, options: options || {} });
+          return undefined;
         }
-
-        const key = JSON.stringify({ url, options });
-        
-        // If we have a result, return it
-        if (httpResults.has(key)) {
-          const result = httpResults.get(key);
-          return vm.unwrapResult(vm.evalCode(`(${JSON.stringify(result)})`));
-        }
-        
-        // Otherwise, record this request
-        if (!httpRequests.some(r => JSON.stringify({ url: r.url, options: r.options }) === key)) {
-          httpRequests.push({ url, options });
-        }
-        
-        // Return undefined for first pass
-        return vm.undefined;
-      });
-      
-      vm.setProp(vm.global, 'httpGet', httpGetFn);
-      httpGetFn.dispose();
+      `));
 
       // First execution to discover HTTP calls
+      let httpRequests: Array<{ url: string; options: any }> = [];
       try {
         const firstResult = vm.unwrapResult(vm.evalCode(code));
         const firstOutput = vm.dump(firstResult);
         firstResult.dispose();
+        
+        // Extract HTTP requests
+        const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
+        const requestsStr = vm.getString(requestsJson);
+        requestsJson.dispose();
+        httpRequests = JSON.parse(requestsStr);
         
         // If no HTTP requests were made, return the result immediately
         if (httpRequests.length === 0) {
@@ -132,6 +112,12 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       } catch (e: any) {
         // Expected to fail if code depends on HTTP results
         request.log.debug(`First pass error (expected): ${e.message}`);
+        
+        // Still extract HTTP requests
+        const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
+        const requestsStr = vm.getString(requestsJson);
+        requestsJson.dispose();
+        httpRequests = JSON.parse(requestsStr);
       }
 
       request.log.debug(`Found ${httpRequests.length} HTTP requests to execute`);
@@ -141,10 +127,11 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
         httpRequests.map(({ url, options }) => performFetch(url, options))
       );
 
-      // Store results in map
+      // Build results map
+      const httpResults: Record<string, any> = {};
       httpRequests.forEach((req, index) => {
         const key = JSON.stringify({ url: req.url, options: req.options });
-        httpResults.set(key, results[index]);
+        httpResults[key] = results[index];
       });
 
       // Create a fresh context with HTTP results
@@ -155,28 +142,14 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       // Re-inject INPUTS
       injectObject(vm2, 'INPUTS', inputs);
 
-      // Create httpGet that returns actual results
-      const httpGetFinalFn = vm2.newFunction('httpGet', (urlHandle, optionsHandle) => {
-        const url = vm2.getString(urlHandle);
-        let options: any = {};
-        
-        if (optionsHandle) {
-          const optionsJson = vm2.dump(optionsHandle);
-          options = optionsJson;
+      // Inject HTTP results and set up httpGet to return cached results
+      injectObject(vm2, '__httpResults', httpResults);
+      vm2.unwrapResult(vm2.evalCode(`
+        function httpGet(url, options) {
+          var key = JSON.stringify({ url: url, options: options || {} });
+          return __httpResults[key];
         }
-
-        const key = JSON.stringify({ url, options });
-        const result = httpResults.get(key);
-        
-        if (result) {
-          return vm2.unwrapResult(vm2.evalCode(`(${JSON.stringify(result)})`));
-        }
-        
-        return vm2.undefined;
-      });
-      
-      vm2.setProp(vm2.global, 'httpGet', httpGetFinalFn);
-      httpGetFinalFn.dispose();
+      `));
 
       // Final execution with actual HTTP results
       const result = vm2.unwrapResult(vm2.evalCode(code));
