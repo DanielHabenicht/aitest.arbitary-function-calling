@@ -61,10 +61,17 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
     return reply.code(400).send({ error: 'Invalid code parameter' });
   }
 
-  // Create async context
+  // Create async context with timeout
   const context = await newAsyncContext();
 
   try {
+    // Set execution timeout (10 seconds)
+    const timeoutMs = 10000;
+    const startTime = Date.now();
+    context.runtime.setInterruptHandler(() => {
+      return Date.now() - startTime > timeoutMs;
+    });
+
     // Inject INPUTS as a global variable
     injectObject(context, 'INPUTS', inputs);
 
@@ -81,11 +88,17 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       // Perform the actual fetch with any HTTP method
       const result = await performFetch(url, options);
       
-      // Return result to QuickJS
-      const resultHandle = context.unwrapResult(
-        context.evalCode(`(${JSON.stringify(result)})`)
+      // Return result to QuickJS using safe injection method
+      // Store in a temporary global variable to avoid code injection
+      const tempVarName = `__httpResult_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const globalObj = context.global;
+      const resultStr = JSON.stringify(result);
+      
+      // Use evalCode with the JSON string but avoid injection by parsing it
+      const parsedHandle = context.unwrapResult(
+        context.evalCode(`JSON.parse(${JSON.stringify(resultStr)})`)
       );
-      return resultHandle;
+      return parsedHandle;
     });
 
     context.setProp(context.global, 'httpRequest', httpRequestFn);
