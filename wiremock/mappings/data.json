@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/api/data"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "message": "Hello from WireMock!",
+      "timestamp": 1234567890,
+      "data": {
+        "value": 42,
+        "status": "active"
+      }
+    }
+  }
+}

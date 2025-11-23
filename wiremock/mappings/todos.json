@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPattern": "/api/todos/([0-9]+)"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "{{request.pathSegments.[2]}}",
+      "title": "Sample Todo {{request.pathSegments.[2]}}",
+      "completed": false,
+      "userId": 1
+    },
+    "transformers": ["response-template"]
+  }
+}
