@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use rquickjs::{AsyncContext, AsyncRuntime, async_with, function::Async};
+use rquickjs::{AsyncContext, AsyncRuntime, async_with, function::{Func, Async}, Object};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -146,17 +146,16 @@ async fn execute_js_with_quickjs(
             .map_err(|e| format!("INPUTS injection error: {}", e))
     }).await?;
     
-    // Register async httpRequest function
+    // Register async httpRequest function using Func::from(Async(...))
     async_with!(context => |ctx| {
-        // Create JavaScript helper to stringify objects
-        ctx.eval::<(), _>(r#"
-            globalThis.__serializeOptions = function(options) {
-                return JSON.stringify(options || {});
-            };
-        "#).map_err(|e| format!("Failed to create helper: {:?}", e))?;
-        
-        // Define async closure and wrap it with Async
-        let async_fn = Async(|(url, options_json): (String, String)| async move {
+        // Define the async function that will be called from JavaScript
+        async fn http_request_impl<'js>(url: String, options: Object<'js>) -> rquickjs::Result<String> {
+            // Convert options object to JSON string
+            let ctx = options.ctx().clone();
+            let json_mod: Object = ctx.globals().get("JSON")?;
+            let stringify: rquickjs::Function = json_mod.get("stringify")?;
+            let options_json: String = stringify.call((options,))?;
+            
             // Parse options from JSON string
             let opts: Option<HashMap<String, Value>> = serde_json::from_str(&options_json).ok();
             
@@ -164,24 +163,23 @@ async fn execute_js_with_quickjs(
             let result = perform_fetch(url, opts).await;
             
             // Return the result as JSON string
-            serde_json::to_string(&serde_json::json!({
+            Ok(serde_json::to_string(&serde_json::json!({
                 "ok": result.ok,
                 "status": result.status,
                 "statusText": result.status_text,
                 "headers": result.headers,
                 "data": result.data,
-            })).unwrap_or_else(|_| "{}".to_string())
-        });
+            })).unwrap_or_else(|_| "{}".to_string()))
+        }
         
-        // Register the async function directly using set
-        ctx.globals().set("__httpRequestAsync", async_fn)
+        // Register the async function using Func::from(Async(...))
+        ctx.globals().set("__httpRequestAsync", Func::from(Async(http_request_impl)))
             .map_err(|e| format!("Failed to set httpRequest: {:?}", e))?;
         
-        // Create a JavaScript wrapper that serializes and deserializes
+        // Create a JavaScript wrapper that parses the JSON result
         ctx.eval::<(), _>(r#"
             async function httpRequest(url, options) {
-                const optionsJson = __serializeOptions(options);
-                const resultJson = await __httpRequestAsync(url, optionsJson);
+                const resultJson = await __httpRequestAsync(url, options || {});
                 return JSON.parse(resultJson);
             }
         "#).map_err(|e| format!("Failed to create httpRequest wrapper: {:?}", e))?;
@@ -189,11 +187,28 @@ async fn execute_js_with_quickjs(
         Ok::<(), String>(())
     }).await?;
     
-    // Execute the user code - wrap in async IIFE to handle await
+    // Execute the user code - evaluate directly as async code (like Node.js does)
+    // The user's code should contain 'await' keywords where needed
     let code_owned = code.to_string();
     let result_json = async_with!(context => |ctx| {
-        // Wrap user code in async IIFE
-        let wrapped_code = format!("(async () => {{ return {}; }})()", code_owned);
+        // Wrap in async IIFE to allow top-level await
+        // For code with statements, find the last semicolon and wrap what comes after in return
+        let trimmed = code_owned.trim();
+        let wrapped_code = if let Some(last_semi) = trimmed.rfind(';') {
+            // Has statements - split at last semicolon
+            let statements = &trimmed[..=last_semi];
+            let last_expr = trimmed[last_semi + 1..].trim();
+            if last_expr.is_empty() {
+                // Ends with semicolon, no expression to return
+                format!("(async () => {{ {} }})()", statements)
+            } else {
+                // Return the last expression
+                format!("(async () => {{ {} return ({}); }})()", statements, last_expr)
+            }
+        } else {
+            // Single expression, wrap in return
+            format!("(async () => {{ return ({}); }})()", trimmed)
+        };
         
         // Evaluate and get the promise
         let promise: rquickjs::Promise = ctx.eval(wrapped_code.as_str())
