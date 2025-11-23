@@ -1,5 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Result};
-use rquickjs::{Context, Runtime};
+use rquickjs::{AsyncContext, AsyncRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -126,13 +126,13 @@ async fn perform_fetch(url: String, options: Option<HashMap<String, Value>>) -> 
 }
 
 // Execute JavaScript code with QuickJS
-fn execute_js_with_quickjs(
+async fn execute_js_with_quickjs(
     code: &str,
     inputs: &HashMap<String, Value>,
     http_results: Option<&HashMap<String, HttpResult>>,
 ) -> std::result::Result<Value, String> {
-    let runtime = Runtime::new().map_err(|e| format!("Runtime error: {}", e))?;
-    let context = Context::full(&runtime).map_err(|e| format!("Context error: {}", e))?;
+    let runtime = AsyncRuntime::new().map_err(|e| format!("Runtime error: {}", e))?;
+    let context = AsyncContext::full(&runtime).await.map_err(|e| format!("Context error: {}", e))?;
     
     context.with(|ctx| {
         // Inject INPUTS object
@@ -196,13 +196,13 @@ fn execute_js_with_quickjs(
             .map_err(|e| format!("JSON stringify error: {}", e))?;
         
         serde_json::from_str(&json_str).map_err(|e| e.to_string())
-    })
+    }).await
 }
 
 // Extract HTTP requests from the first pass
-fn extract_http_requests(code: &str, inputs: &HashMap<String, Value>) -> std::result::Result<Vec<(String, Option<HashMap<String, Value>>)>, String> {
-    let runtime = Runtime::new().map_err(|e| format!("Runtime error: {}", e))?;
-    let context = Context::full(&runtime).map_err(|e| format!("Context error: {}", e))?;
+async fn extract_http_requests(code: &str, inputs: &HashMap<String, Value>) -> std::result::Result<Vec<(String, Option<HashMap<String, Value>>)>, String> {
+    let runtime = AsyncRuntime::new().map_err(|e| format!("Runtime error: {}", e))?;
+    let context = AsyncContext::full(&runtime).await.map_err(|e| format!("Context error: {}", e))?;
     
     context.with(|ctx| {
         // Inject INPUTS
@@ -253,7 +253,7 @@ fn extract_http_requests(code: &str, inputs: &HashMap<String, Value>) -> std::re
         }
         
         Ok(result)
-    })
+    }).await
 }
 
 async fn execute_handler(req: web::Json<ExecuteRequest>) -> Result<HttpResponse> {
@@ -265,11 +265,11 @@ async fn execute_handler(req: web::Json<ExecuteRequest>) -> Result<HttpResponse>
     }
     
     // First pass: try to execute and collect HTTP requests
-    let http_requests = match extract_http_requests(&req.code, &req.inputs) {
+    let http_requests = match extract_http_requests(&req.code, &req.inputs).await {
         Ok(requests) => requests,
         Err(_) => {
             // If extraction fails, try direct execution (no HTTP calls)
-            match execute_js_with_quickjs(&req.code, &req.inputs, None) {
+            match execute_js_with_quickjs(&req.code, &req.inputs, None).await {
                 Ok(result) => return Ok(HttpResponse::Ok().json(ExecuteResponse { result })),
                 Err(e) => return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
                     error: "Execution failed".to_string(),
@@ -281,7 +281,7 @@ async fn execute_handler(req: web::Json<ExecuteRequest>) -> Result<HttpResponse>
     
     // If no HTTP requests, execute directly
     if http_requests.is_empty() {
-        match execute_js_with_quickjs(&req.code, &req.inputs, None) {
+        match execute_js_with_quickjs(&req.code, &req.inputs, None).await {
             Ok(result) => return Ok(HttpResponse::Ok().json(ExecuteResponse { result })),
             Err(e) => return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Execution failed".to_string(),
@@ -302,7 +302,7 @@ async fn execute_handler(req: web::Json<ExecuteRequest>) -> Result<HttpResponse>
     }
     
     // Second pass: execute with HTTP results
-    match execute_js_with_quickjs(&req.code, &req.inputs, Some(&http_results)) {
+    match execute_js_with_quickjs(&req.code, &req.inputs, Some(&http_results)).await {
         Ok(result) => Ok(HttpResponse::Ok().json(ExecuteResponse { result })),
         Err(e) => Ok(HttpResponse::InternalServerError().json(ErrorResponse {
             error: "Execution failed".to_string(),
