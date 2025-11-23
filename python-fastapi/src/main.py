@@ -125,6 +125,10 @@ def create_context_with_http_support(
                 __httpRequests.push({ url: url, options: options || {} });
                 return undefined;
             }
+            // Alias httpGet for backwards compatibility
+            function httpGet(url, options) {
+                return httpRequest(url, options);
+            }
         """)
     else:
         # Return cached results
@@ -134,6 +138,10 @@ def create_context_with_http_support(
                 // Match Python's key format with sorted keys
                 var key = JSON.stringify({ 'options': options || {}, 'url': url });
                 return __httpResults[key];
+            }
+            // Alias httpGet for backwards compatibility
+            function httpGet(url, options) {
+                return httpRequest(url, options);
             }
         """)
     

@@ -38,6 +38,16 @@ TEST_CASES = [
         "code": "INPUTS.values.map(v => Math.sqrt(v)).filter(v => v > 5).length",
         "inputs": {"values": [4, 9, 16, 25, 36, 49, 64, 81, 100]}
     },
+    {
+        "name": "HTTP GET WireMock data",
+        "code": "const response = httpGet('http://wiremock:8080/api/data'); response.data.message",
+        "inputs": {}
+    },
+    {
+        "name": "HTTP GET WireMock users",
+        "code": "const response = httpGet('http://wiremock:8080/api/users'); response.data.length",
+        "inputs": {}
+    },
 ]
 
 def benchmark_request(service_url: str, test_case: Dict[str, Any]) -> float:
