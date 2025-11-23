@@ -35,10 +35,14 @@ function injectObject(vm: any, name: string, obj: any) {
 
 // Helper to extract HTTP requests from VM
 function extractHttpRequests(vm: any): Array<{ url: string; options: any }> {
-  const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
-  const requestsStr = vm.getString(requestsJson);
-  requestsJson.dispose();
-  return JSON.parse(requestsStr);
+  try {
+    const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
+    const requestsStr = vm.getString(requestsJson);
+    requestsJson.dispose();
+    return JSON.parse(requestsStr);
+  } catch (e: any) {
+    throw new Error(`Failed to extract HTTP requests: ${e.message}`);
+  }
 }
 
 // Helper to perform fetch and return serialized result
@@ -108,7 +112,8 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       injectObject(vm, 'INPUTS', inputs);
 
       // First pass: Set up httpGet to collect HTTP requests
-      vm.unwrapResult(vm.evalCode(FIRST_PASS_SETUP));
+      const setupHandle = vm.unwrapResult(vm.evalCode(FIRST_PASS_SETUP));
+      setupHandle.dispose();
 
       // First execution to discover HTTP calls
       let httpRequests: Array<{ url: string; options: any }> = [];
@@ -157,7 +162,8 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
 
       // Inject HTTP results and set up httpGet to return cached results
       injectObject(vm2, '__httpResults', httpResults);
-      vm2.unwrapResult(vm2.evalCode(SECOND_PASS_SETUP));
+      const setup2Handle = vm2.unwrapResult(vm2.evalCode(SECOND_PASS_SETUP));
+      setup2Handle.dispose();
 
       // Final execution with actual HTTP results
       const result = vm2.unwrapResult(vm2.evalCode(code));
