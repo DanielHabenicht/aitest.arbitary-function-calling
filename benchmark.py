@@ -40,12 +40,12 @@ TEST_CASES = [
     },
     {
         "name": "HTTP GET WireMock data",
-        "code": "httpGet('http://wiremock:8080/api/data')",
+        "code": "httpRequest('http://wiremock:8080/api/data')",
         "inputs": {}
     },
     {
         "name": "HTTP GET WireMock users",
-        "code": "httpGet('http://wiremock:8080/api/users')",
+        "code": "httpRequest('http://wiremock:8080/api/users')",
         "inputs": {}
     },
 ]

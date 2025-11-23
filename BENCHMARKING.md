@@ -71,11 +71,11 @@ The comprehensive benchmark includes these test cases:
    - Tests mathematical operations and filtering
 
 5. **HTTP GET WireMock data**
-   - Code: `httpGet('http://wiremock:8080/api/data')`
+   - Code: `httpRequest('http://wiremock:8080/api/data')`
    - Tests HTTP request capability with WireMock mock API
 
 6. **HTTP GET WireMock users**
-   - Code: `httpGet('http://wiremock:8080/api/users')`
+   - Code: `httpRequest('http://wiremock:8080/api/users')`
    - Tests HTTP request capability with different WireMock endpoint
 
 ## Understanding Results

@@ -10,7 +10,7 @@ echo ""
 # Test cases
 declare -a TEST_CASES=(
     '{"name":"Simple arithmetic","code":"INPUTS.x + INPUTS.y","inputs":{"x":20,"y":22}}'
-    "{\"name\":\"HTTP GET WireMock\",\"code\":\"httpGet('http://wiremock:8080/api/data')\",\"inputs\":{}}"
+    "{\"name\":\"HTTP GET WireMock\",\"code\":\"httpRequest('http://wiremock:8080/api/data')\",\"inputs\":{}}"
 )
 
 # Services
