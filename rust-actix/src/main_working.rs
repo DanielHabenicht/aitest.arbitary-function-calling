@@ -1,10 +1,4 @@
-use axum::{
-    extract::Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{get, post},
-    Router,
-};
+use actix_web::{web, App, HttpResponse, HttpServer, Result};
 use rquickjs::{AsyncContext, AsyncRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -131,7 +125,7 @@ async fn perform_fetch(url: String, options: Option<HashMap<String, Value>>) -> 
     }
 }
 
-// Execute JavaScript code with QuickJS - single pass with inline HTTP execution
+// Execute JavaScript code with QuickJS
 async fn execute_js_with_quickjs(
     code: &str,
     inputs: &HashMap<String, Value>,
@@ -174,6 +168,9 @@ async fn execute_js_with_quickjs(
                 });
                 let result_str = serde_json::to_string(&result_json).map_err(|e| e.to_string())?;
                 // Use the key directly as a JavaScript object property key
+                // The key is already a JSON string like '{"url":"...","options":{}}'
+                // We want to set __httpResults[key] = result
+                // But we need to pass the key as a string, so we escape it for JavaScript
                 let escaped_key = key.replace('\\', "\\\\").replace('"', "\\\"");
                 let assign_code = format!("__httpResults[\"{}\"] = {};", escaped_key, result_str);
                 ctx.eval::<(), _>(assign_code)
@@ -263,15 +260,12 @@ async fn extract_http_requests(code: &str, inputs: &HashMap<String, Value>) -> s
     }).await
 }
 
-async fn execute_handler(Json(req): Json<ExecuteRequest>) -> Response {
+async fn execute_handler(req: web::Json<ExecuteRequest>) -> Result<HttpResponse> {
     if req.code.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Invalid code parameter".to_string(),
-                message: "Code cannot be empty".to_string(),
-            }),
-        ).into_response();
+        return Ok(HttpResponse::BadRequest().json(ErrorResponse {
+            error: "Invalid code parameter".to_string(),
+            message: "Code cannot be empty".to_string(),
+        }));
     }
     
     // First pass: try to execute and collect HTTP requests
@@ -280,14 +274,11 @@ async fn execute_handler(Json(req): Json<ExecuteRequest>) -> Response {
         Err(_) => {
             // If extraction fails, try direct execution (no HTTP calls)
             match execute_js_with_quickjs(&req.code, &req.inputs, None).await {
-                Ok(result) => return (StatusCode::OK, Json(ExecuteResponse { result })).into_response(),
-                Err(e) => return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "Execution failed".to_string(),
-                        message: e,
-                    }),
-                ).into_response(),
+                Ok(result) => return Ok(HttpResponse::Ok().json(ExecuteResponse { result })),
+                Err(e) => return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+                    error: "Execution failed".to_string(),
+                    message: e,
+                })),
             }
         }
     };
@@ -295,77 +286,60 @@ async fn execute_handler(Json(req): Json<ExecuteRequest>) -> Response {
     // If no HTTP requests, execute directly
     if http_requests.is_empty() {
         match execute_js_with_quickjs(&req.code, &req.inputs, None).await {
-            Ok(result) => return (StatusCode::OK, Json(ExecuteResponse { result })).into_response(),
-            Err(e) => return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Execution failed".to_string(),
-                    message: e,
-                }),
-            ).into_response(),
+            Ok(result) => return Ok(HttpResponse::Ok().json(ExecuteResponse { result })),
+            Err(e) => return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Execution failed".to_string(),
+                message: e,
+            })),
         }
     }
     
-    // Execute HTTP requests in parallel
+    // Execute HTTP requests
     let mut http_results = HashMap::new();
-    let futures: Vec<_> = http_requests.iter().map(|(url, options)| {
-        perform_fetch(url.clone(), options.clone())
-    }).collect();
-    
-    let results = futures::future::join_all(futures).await;
-    
-    for ((url, options), result) in http_requests.iter().zip(results.iter()) {
+    for (url, options) in http_requests {
+        let result = perform_fetch(url.clone(), options.clone()).await;
         // Use compact JSON format (no spaces) to match JavaScript's JSON.stringify
         let key_obj = serde_json::json!({
             "url": url,
-            "options": options.as_ref().unwrap_or(&HashMap::new())
+            "options": options.unwrap_or_default()
         });
         let key = serde_json::to_string(&key_obj).unwrap_or_default();
-        http_results.insert(key, result.clone());
+        http_results.insert(key, result);
     }
     
     // Second pass: execute with HTTP results
     match execute_js_with_quickjs(&req.code, &req.inputs, Some(&http_results)).await {
-        Ok(result) => (StatusCode::OK, Json(ExecuteResponse { result })).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Execution failed".to_string(),
-                message: e,
-            }),
-        ).into_response(),
+        Ok(result) => Ok(HttpResponse::Ok().json(ExecuteResponse { result })),
+        Err(e) => Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Execution failed".to_string(),
+            message: e,
+        })),
     }
 }
 
-async fn health_handler() -> Response {
-    (StatusCode::OK, Json(HealthResponse {
+async fn health_handler() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok().json(HealthResponse {
         status: "ok".to_string(),
-    })).into_response()
+    }))
 }
 
-#[tokio::main]
-async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     
     let port = std::env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string())
         .parse::<u16>()
         .unwrap_or(3000);
     
-    tracing::info!("Starting server on 0.0.0.0:{}", port);
+    log::info!("Starting server on 0.0.0.0:{}", port);
     
-    // Build our application with routes
-    let app = Router::new()
-        .route("/execute", post(execute_handler))
-        .route("/health", get(health_handler));
-    
-    // Run the server
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
-        .await
-        .unwrap();
-    
-    tracing::info!("Server listening on {}", listener.local_addr().unwrap());
-    
-    axum::serve(listener, app).await.unwrap();
+    HttpServer::new(|| {
+        App::new()
+            .route("/execute", web::post().to(execute_handler))
+            .route("/health", web::get().to(health_handler))
+    })
+    .bind(("0.0.0.0", port))?
+    .run()
+    .await
 }
