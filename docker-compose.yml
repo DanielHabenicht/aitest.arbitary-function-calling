@@ -25,9 +25,9 @@ services:
     environment:
       - PORT=3000
 
-  # Rust Actix-web implementation
+  # Rust Axum implementation
   rust-service:
-    build: ./rust-actix
+    build: ./rust
     ports:
       - "3002:3000"
     depends_on:

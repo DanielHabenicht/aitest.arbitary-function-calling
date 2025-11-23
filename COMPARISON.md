@@ -4,10 +4,10 @@ Detailed comparison of the three implementations.
 
 ## Overview
 
-| Feature | Python FastAPI | Node.js Fastify | Rust Actix-web |
-|---------|---------------|-----------------|----------------|
+| Feature | Python FastAPI | Node.js Fastify | Rust Axum |
+|---------|---------------|-----------------|-----------|
 | **Language** | Python 3.11+ | TypeScript/Node.js 20+ | Rust 1.75+ |
-| **Framework** | FastAPI | Fastify | Actix-web |
+| **Framework** | FastAPI | Fastify | Axum |
 | **JS Engine** | PyMiniRacer (V8) | QuickJS (WebAssembly) | rquickjs (QuickJS) |
 | **Async Model** | async/await (asyncio) | async/await (event loop) | async/await (Tokio) |
 | **Port** | 3000 | 3001 | 3002 |
@@ -71,15 +71,16 @@ Detailed comparison of the three implementations.
 - Microservices architecture
 - When ecosystem is important
 
-### Rust Actix-web
+### Rust Axum
 
 **Pros:**
 - ✅ Highest performance
 - ✅ Lowest memory usage
 - ✅ Type safety and no runtime errors
-- ✅ Best concurrency handling
+- ✅ Best concurrency handling with tokio multi-threaded runtime
 - ✅ Fastest cold start
 - ✅ Zero-cost abstractions
+- ✅ True single-pass async execution
 
 **Cons:**
 - ❌ Steeper learning curve
@@ -113,8 +114,8 @@ All implementations are relatively similar in complexity.
 | POST /execute | ✅ | ✅ | ✅ |
 | GET /health | ✅ | ✅ | ✅ |
 | INPUTS injection | ✅ | ✅ | ✅ |
-| httpGet() support | ✅ Full | ✅ Full | ✅ Full |
-| Two-pass execution | ✅ | ✅ | ✅ |
+| httpRequest() support | ✅ Full | ✅ Full | ✅ Full |
+| Single-pass execution | ❌ (two-pass) | ✅ | ✅ |
 | Timeout protection | ✅ | ✅ | ✅ |
 | Error handling | ✅ | ✅ | ✅ |
 | JSON serialization | ✅ | ✅ | ✅ |

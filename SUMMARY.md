@@ -24,15 +24,15 @@ This repository contains three production-ready implementations of a secure Java
   - Native JavaScript handling
 - **Files**: `nodejs-fastify/`
 
-### 3. Rust Actix-web Implementation (Port 3002)
-- **Framework**: Actix-web with Tokio
+### 3. Rust Axum Implementation (Port 3002)
+- **Framework**: Axum with Tokio
 - **HTTP**: Reqwest async client
 - **Features**:
   - Maximum performance
   - Lowest memory footprint
   - Type-safe API
-  - Simplified JS execution (HTTP support)
-- **Files**: `rust-actix/`
+  - Single-pass async execution with rquickjs
+- **Files**: `rust/`
 
 ## Shared Infrastructure
 
@@ -154,8 +154,8 @@ python3 benchmark.py
 │   ├── package.json     # Dependencies
 │   └── tsconfig.json    # TypeScript config
 │
-├── rust-actix/           # Rust implementation
-│   ├── src/main.rs      # Actix-web server
+├── rust/                 # Rust implementation
+│   ├── src/main.rs      # Axum server
 │   ├── Dockerfile       # Container definition
 │   └── Cargo.toml       # Dependencies
 │
