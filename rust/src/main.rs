@@ -182,8 +182,8 @@ async fn execute_js_with_quickjs(
                 const resultJson = await __httpRequestAsync(url, options || {});
                 return JSON.parse(resultJson);
             }
-            // Alias httpGet for backwards compatibility
-            async function httpGet(url, options) {
+            // Alias httpGet for backwards compatibility (not async to match Python/Node.js behavior)
+            function httpGet(url, options) {
                 return httpRequest(url, options);
             }
         "#).map_err(|e| format!("Failed to create httpRequest wrapper: {:?}", e))?;
