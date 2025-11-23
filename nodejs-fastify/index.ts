@@ -68,8 +68,8 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
     // Inject INPUTS as a global variable
     injectObject(context, 'INPUTS', inputs);
 
-    // Create a native async function for httpGet
-    const httpGetFn = context.newAsyncifiedFunction('httpGet', async (urlHandle, optionsHandle) => {
+    // Create a native async function for HTTP requests (supports all verbs)
+    const httpRequestFn = context.newAsyncifiedFunction('httpRequest', async (urlHandle, optionsHandle) => {
       const url = context.getString(urlHandle);
       let options: any = {};
       
@@ -78,7 +78,7 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
         options = optionsJson;
       }
 
-      // Perform the actual fetch
+      // Perform the actual fetch with any HTTP method
       const result = await performFetch(url, options);
       
       // Return result to QuickJS
@@ -88,8 +88,15 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       return resultHandle;
     });
 
-    context.setProp(context.global, 'httpGet', httpGetFn);
-    httpGetFn.dispose();
+    context.setProp(context.global, 'httpRequest', httpRequestFn);
+    httpRequestFn.dispose();
+
+    // Also provide httpGet as a convenience wrapper for backwards compatibility
+    context.unwrapResult(context.evalCode(`
+      function httpGet(url, options) {
+        return httpRequest(url, options);
+      }
+    `)).dispose();
 
     // Execute the user code asynchronously
     const resultPromise = await context.evalCodeAsync(code);
