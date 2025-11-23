@@ -10,11 +10,35 @@ interface ExecuteRequest {
   inputs: Record<string, any>;
 }
 
+// JavaScript code snippets for QuickJS context
+const FIRST_PASS_SETUP = `
+  var __httpRequests = [];
+  function httpGet(url, options) {
+    __httpRequests.push({ url: url, options: options || {} });
+    return undefined;
+  }
+`;
+
+const SECOND_PASS_SETUP = `
+  function httpGet(url, options) {
+    var key = JSON.stringify({ url: url, options: options || {} });
+    return __httpResults[key];
+  }
+`;
+
 // Helper to inject JavaScript object into QuickJS VM
 function injectObject(vm: any, name: string, obj: any) {
   const handle = vm.unwrapResult(vm.evalCode(`(${JSON.stringify(obj)})`));
   vm.setProp(vm.global, name, handle);
   handle.dispose();
+}
+
+// Helper to extract HTTP requests from VM
+function extractHttpRequests(vm: any): Array<{ url: string; options: any }> {
+  const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
+  const requestsStr = vm.getString(requestsJson);
+  requestsJson.dispose();
+  return JSON.parse(requestsStr);
 }
 
 // Helper to perform fetch and return serialized result
@@ -78,18 +102,13 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       return false;
     });
 
+    let vm2: any = null;
     try {
       // Inject INPUTS as a global variable
       injectObject(vm, 'INPUTS', inputs);
 
       // First pass: Set up httpGet to collect HTTP requests
-      vm.unwrapResult(vm.evalCode(`
-        var __httpRequests = [];
-        function httpGet(url, options) {
-          __httpRequests.push({ url: url, options: options || {} });
-          return undefined;
-        }
-      `));
+      vm.unwrapResult(vm.evalCode(FIRST_PASS_SETUP));
 
       // First execution to discover HTTP calls
       let httpRequests: Array<{ url: string; options: any }> = [];
@@ -99,10 +118,7 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
         firstResult.dispose();
         
         // Extract HTTP requests
-        const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
-        const requestsStr = vm.getString(requestsJson);
-        requestsJson.dispose();
-        httpRequests = JSON.parse(requestsStr);
+        httpRequests = extractHttpRequests(vm);
         
         // If no HTTP requests were made, return the result immediately
         if (httpRequests.length === 0) {
@@ -114,10 +130,7 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
         request.log.debug(`First pass error (expected): ${e.message}`);
         
         // Still extract HTTP requests
-        const requestsJson = vm.unwrapResult(vm.evalCode('JSON.stringify(__httpRequests)'));
-        const requestsStr = vm.getString(requestsJson);
-        requestsJson.dispose();
-        httpRequests = JSON.parse(requestsStr);
+        httpRequests = extractHttpRequests(vm);
       }
 
       request.log.debug(`Found ${httpRequests.length} HTTP requests to execute`);
@@ -137,19 +150,14 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       // Create a fresh context with HTTP results
       vm.dispose();
       const QuickJS2 = await getQuickJS();
-      const vm2 = QuickJS2.newContext();
+      vm2 = QuickJS2.newContext();
 
       // Re-inject INPUTS
       injectObject(vm2, 'INPUTS', inputs);
 
       // Inject HTTP results and set up httpGet to return cached results
       injectObject(vm2, '__httpResults', httpResults);
-      vm2.unwrapResult(vm2.evalCode(`
-        function httpGet(url, options) {
-          var key = JSON.stringify({ url: url, options: options || {} });
-          return __httpResults[key];
-        }
-      `));
+      vm2.unwrapResult(vm2.evalCode(SECOND_PASS_SETUP));
 
       // Final execution with actual HTTP results
       const result = vm2.unwrapResult(vm2.evalCode(code));
@@ -157,10 +165,12 @@ fastify.post<{ Body: ExecuteRequest }>('/execute', async (request, reply) => {
       result.dispose();
 
       vm2.dispose();
+      vm2 = null;
       return reply.send({ result: output });
     } catch (error: any) {
       // Make sure to clean up VMs if they exist
       try { vm.dispose(); } catch (e) {}
+      try { if (vm2) vm2.dispose(); } catch (e) {}
       throw error;
     }
   } catch (error: any) {
