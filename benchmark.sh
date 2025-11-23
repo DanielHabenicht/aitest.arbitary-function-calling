@@ -10,7 +10,7 @@ echo ""
 # Test cases
 declare -a TEST_CASES=(
     '{"name":"Simple arithmetic","code":"INPUTS.x + INPUTS.y","inputs":{"x":20,"y":22}}'
-    '{"name":"HTTP GET WireMock","code":"httpGet('\''http://wiremock:8080/api/data'\'')","inputs":{}}'
+    "{\"name\":\"HTTP GET WireMock\",\"code\":\"httpGet('http://wiremock:8080/api/data')\",\"inputs\":{}}"
 )
 
 # Services
@@ -43,8 +43,10 @@ for SERVICE_NAME in "${!SERVICES[@]}"; do
     
     # Run each test case
     for TEST_CASE in "${TEST_CASES[@]}"; do
-        TEST_NAME=$(echo "$TEST_CASE" | python3 -c "import sys, json; print(json.load(sys.stdin)['name'])")
-        CODE=$(echo "$TEST_CASE" | python3 -c "import sys, json; tc=json.load(sys.stdin); print(json.dumps({'code': tc['code'], 'inputs': tc['inputs']}))")
+        # Parse test case JSON once to extract name and create code payload
+        PARSED=$(echo "$TEST_CASE" | python3 -c "import sys, json; tc=json.load(sys.stdin); print(tc['name'] + '|||' + json.dumps({'code': tc['code'], 'inputs': tc['inputs']}))")
+        TEST_NAME="${PARSED%%|||*}"
+        CODE="${PARSED#*|||}"
         
         echo ""
         echo "  Test: $TEST_NAME"

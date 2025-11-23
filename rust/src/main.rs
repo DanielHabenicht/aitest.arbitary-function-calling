@@ -182,7 +182,8 @@ async fn execute_js_with_quickjs(
                 const resultJson = await __httpRequestAsync(url, options || {});
                 return JSON.parse(resultJson);
             }
-            // Alias httpGet for backwards compatibility (not async to match Python/Node.js behavior)
+            // Alias httpGet for backwards compatibility
+            // Note: httpGet returns a Promise (same as httpRequest) which is resolved by the async IIFE wrapper
             function httpGet(url, options) {
                 return httpRequest(url, options);
             }
