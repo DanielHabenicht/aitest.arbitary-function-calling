@@ -70,6 +70,14 @@ The comprehensive benchmark includes these test cases:
    - Code: `INPUTS.values.map(v => Math.sqrt(v)).filter(v => v > 5).length`
    - Tests mathematical operations and filtering
 
+5. **HTTP GET WireMock data**
+   - Code: `httpGet('http://wiremock:8080/api/data')`
+   - Tests HTTP request capability with WireMock mock API
+
+6. **HTTP GET WireMock users**
+   - Code: `httpGet('http://wiremock:8080/api/users')`
+   - Tests HTTP request capability with different WireMock endpoint
+
 ## Understanding Results
 
 ### Metrics Explained
