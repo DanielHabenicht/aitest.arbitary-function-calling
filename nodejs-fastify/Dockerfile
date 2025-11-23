@@ -1,32 +1,34 @@
-# Use Node.js LTS version with support for native fetch
-FROM node:20-alpine
-
-# Set working directory
+# Builder stage: install deps and compile TypeScript
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copy package files
+# Install build-time dependencies (including devDeps for TypeScript)
 COPY package*.json ./
-
-# Install all dependencies
 RUN npm ci
 
-# Copy TypeScript config and source code
+# Copy sources and build
 COPY tsconfig.json ./
 COPY index.ts ./
-
-# Build TypeScript
 RUN npm run build
 
-# Remove dev dependencies to reduce image size
+# Remove devDependencies to keep node_modules production-only
 RUN npm prune --production
 
-# Expose port
-EXPOSE 3000
+# Runtime stage: smaller image with only production artifacts
+FROM node:20-alpine AS runner
+WORKDIR /app
 
-# Set environment variables
+# Environment
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
 
-# Start the application
-CMD ["npm", "start"]
+# Copy built files and production node_modules from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+
+EXPOSE 3000
+
+# Use node to run the compiled JS directly
+CMD ["node", "dist/index.js"]
