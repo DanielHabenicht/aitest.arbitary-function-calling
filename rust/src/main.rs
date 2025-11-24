@@ -57,6 +57,13 @@ impl Serialize for HttpResult {
     }
 }
 
+// Helper function to evaluate code and return JSON stringified result
+fn evaluate_and_stringify(ctx: &rquickjs::Ctx, code: &str) -> rquickjs::Result<String> {
+    let result: rquickjs::Value = ctx.eval(code)?;
+    ctx.globals().set("__result", result)?;
+    ctx.eval::<String, _>("JSON.stringify(__result)")
+}
+
 async fn perform_fetch(url: String, options: Option<HashMap<String, Value>>) -> HttpResult {
     let client = reqwest::Client::new();
     
@@ -163,8 +170,12 @@ async fn execute_js_with_quickjs(
     
     // Try to execute the code (may fail if it depends on HTTP results, that's okay)
     let http_requests_json = context.with(|ctx| {
-        // Try to evaluate code
-        let _ = ctx.eval::<rquickjs::Value, _>(code);
+        // Try to evaluate code - silently ignore errors as they're expected when code depends on HTTP results
+        // Only genuine errors (like syntax errors) would fail before reaching HTTP calls
+        if let Err(e) = ctx.eval::<rquickjs::Value, _>(code) {
+            // Log for debugging but don't fail - this is expected if code depends on HTTP results
+            eprintln!("First pass evaluation failed (expected if code uses HTTP results): {:?}", e);
+        }
         
         // Get collected requests
         ctx.eval::<String, _>("JSON.stringify(__httpRequests)")
@@ -183,14 +194,8 @@ async fn execute_js_with_quickjs(
     // If no HTTP requests, return the result from first pass
     if http_requests.is_empty() {
         let result_json = context.with(|ctx| {
-            let result: rquickjs::Value = ctx.eval(code)
-                .map_err(|e| format!("Evaluation error: {:?}", e))?;
-            
-            ctx.globals().set("__result", result)
-                .map_err(|e| format!("Set result error: {:?}", e))?;
-            
-            ctx.eval::<String, _>("JSON.stringify(__result)")
-                .map_err(|e| format!("JSON stringify error: {:?}", e))
+            evaluate_and_stringify(&ctx, code)
+                .map_err(|e| format!("Evaluation error: {:?}", e))
         }).await?;
         
         return serde_json::from_str(&result_json).map_err(|e| e.to_string());
@@ -218,7 +223,8 @@ async fn execute_js_with_quickjs(
             "options": req.options,
             "url": req.url,
         });
-        let key_str = serde_json::to_string(&key).unwrap();
+        let key_str = serde_json::to_string(&key)
+            .map_err(|e| format!("Failed to serialize request key: {}", e))?;
         let result_value = serde_json::json!({
             "ok": result.ok,
             "status": result.status,
@@ -259,14 +265,8 @@ async fn execute_js_with_quickjs(
     
     // Execute the code and return the result
     let result_json = context2.with(|ctx| {
-        let result: rquickjs::Value = ctx.eval(code)
-            .map_err(|e| format!("Evaluation error: {:?}", e))?;
-        
-        ctx.globals().set("__result", result)
-            .map_err(|e| format!("Set result error: {:?}", e))?;
-        
-        ctx.eval::<String, _>("JSON.stringify(__result)")
-            .map_err(|e| format!("JSON stringify error: {:?}", e))
+        evaluate_and_stringify(&ctx, code)
+            .map_err(|e| format!("Evaluation error: {:?}", e))
     }).await?;
     
     serde_json::from_str(&result_json).map_err(|e| e.to_string())
