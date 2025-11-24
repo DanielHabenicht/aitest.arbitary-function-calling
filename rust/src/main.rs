@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use rquickjs::{AsyncContext, AsyncRuntime, async_with, function::{Func, Async}, Object};
+use rquickjs::{AsyncContext, AsyncRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -55,6 +55,13 @@ impl Serialize for HttpResult {
         state.serialize_field("data", &self.data)?;
         state.end()
     }
+}
+
+// Helper function to evaluate code and return JSON stringified result
+fn evaluate_and_stringify(ctx: &rquickjs::Ctx, code: &str) -> rquickjs::Result<String> {
+    let result: rquickjs::Value = ctx.eval(code)?;
+    ctx.globals().set("__result", result)?;
+    ctx.eval::<String, _>("JSON.stringify(__result)")
 }
 
 async fn perform_fetch(url: String, options: Option<HashMap<String, Value>>) -> HttpResult {
@@ -131,11 +138,12 @@ async fn perform_fetch(url: String, options: Option<HashMap<String, Value>>) -> 
     }
 }
 
-// Execute JavaScript code with QuickJS - true single pass with async HTTP execution
+// Execute JavaScript code with QuickJS - two-pass approach for synchronous-looking async code
 async fn execute_js_with_quickjs(
     code: &str,
     inputs: &HashMap<String, Value>,
 ) -> std::result::Result<Value, String> {
+    // FIRST PASS: Collect HTTP requests
     let runtime = AsyncRuntime::new().map_err(|e| format!("Runtime error: {}", e))?;
     let context = AsyncContext::full(&runtime).await.map_err(|e| format!("Context error: {}", e))?;
     
@@ -146,86 +154,119 @@ async fn execute_js_with_quickjs(
             .map_err(|e| format!("INPUTS injection error: {}", e))
     }).await?;
     
-    // Register async httpRequest function using Func::from(Async(...))
-    async_with!(context => |ctx| {
-        // Define the async function that will be called from JavaScript
-        async fn http_request_impl<'js>(url: String, options: Object<'js>) -> rquickjs::Result<String> {
-            // Convert options object to JSON string
-            let ctx = options.ctx().clone();
-            let json_mod: Object = ctx.globals().get("JSON")?;
-            let stringify: rquickjs::Function = json_mod.get("stringify")?;
-            let options_json: String = stringify.call((options,))?;
-            
-            // Parse options from JSON string
-            let opts: Option<HashMap<String, Value>> = serde_json::from_str(&options_json).ok();
-            
-            // Perform the HTTP request
-            let result = perform_fetch(url, opts).await;
-            
-            // Return the result as JSON string
-            Ok(serde_json::to_string(&serde_json::json!({
-                "ok": result.ok,
-                "status": result.status,
-                "statusText": result.status_text,
-                "headers": result.headers,
-                "data": result.data,
-            })).unwrap_or_else(|_| "{}".to_string()))
-        }
-        
-        // Register the async function using Func::from(Async(...))
-        ctx.globals().set("__httpRequestAsync", Func::from(Async(http_request_impl)))
-            .map_err(|e| format!("Failed to set httpRequest: {:?}", e))?;
-        
-        // Create a JavaScript wrapper that parses the JSON result
+    // Setup to collect HTTP requests (httpGet returns undefined and records the request)
+    context.with(|ctx| {
         ctx.eval::<(), _>(r#"
-            async function httpRequest(url, options) {
-                const resultJson = await __httpRequestAsync(url, options || {});
-                return JSON.parse(resultJson);
+            var __httpRequests = [];
+            function httpRequest(url, options) {
+                __httpRequests.push({ url: url, options: options || {} });
+                return undefined;
             }
-        "#).map_err(|e| format!("Failed to create httpRequest wrapper: {:?}", e))?;
-        
-        Ok::<(), String>(())
+            function httpGet(url, options) {
+                return httpRequest(url, options);
+            }
+        "#).map_err(|e| format!("Failed to setup request collection: {:?}", e))
     }).await?;
     
-    // Execute the user code - evaluate directly as async code (like Node.js does)
-    // The user's code should contain 'await' keywords where needed
-    let code_owned = code.to_string();
-    let result_json = async_with!(context => |ctx| {
-        // Wrap in async IIFE to allow top-level await
-        // For code with statements, find the last semicolon and wrap what comes after in return
-        let trimmed = code_owned.trim();
-        let wrapped_code = if let Some(last_semi) = trimmed.rfind(';') {
-            // Has statements - split at last semicolon
-            let statements = &trimmed[..=last_semi];
-            let last_expr = trimmed[last_semi + 1..].trim();
-            if last_expr.is_empty() {
-                // Ends with semicolon, no expression to return
-                format!("(async () => {{ {} }})()", statements)
-            } else {
-                // Return the last expression
-                format!("(async () => {{ {} return ({}); }})()", statements, last_expr)
-            }
+    // Try to execute the code (may fail if it depends on HTTP results, that's okay)
+    let http_requests_json = context.with(|ctx| {
+        // Try to evaluate code - silently ignore errors as they're expected when code depends on HTTP results
+        // Only genuine errors (like syntax errors) would fail before reaching HTTP calls
+        if let Err(e) = ctx.eval::<rquickjs::Value, _>(code) {
+            // Log for debugging but don't fail - this is expected if code depends on HTTP results
+            eprintln!("First pass evaluation failed (expected if code uses HTTP results): {:?}", e);
+        }
+        
+        // Get collected requests
+        ctx.eval::<String, _>("JSON.stringify(__httpRequests)")
+            .map_err(|e| format!("Failed to get HTTP requests: {:?}", e))
+    }).await?;
+    
+    #[derive(Deserialize)]
+    struct HttpRequest {
+        url: String,
+        options: HashMap<String, Value>,
+    }
+    
+    let http_requests: Vec<HttpRequest> = serde_json::from_str(&http_requests_json)
+        .map_err(|e| format!("Failed to parse requests: {}", e))?;
+    
+    // If no HTTP requests, return the result from first pass
+    if http_requests.is_empty() {
+        let result_json = context.with(|ctx| {
+            evaluate_and_stringify(&ctx, code)
+                .map_err(|e| format!("Evaluation error: {:?}", e))
+        }).await?;
+        
+        return serde_json::from_str(&result_json).map_err(|e| e.to_string());
+    }
+    
+    // Execute all HTTP requests in parallel
+    let mut tasks = Vec::new();
+    for req in &http_requests {
+        let url = req.url.clone();
+        let options = if req.options.is_empty() {
+            None
         } else {
-            // Single expression, wrap in return
-            format!("(async () => {{ return ({}); }})()", trimmed)
+            Some(req.options.clone())
         };
+        tasks.push(perform_fetch(url, options));
+    }
+    
+    let results = futures::future::join_all(tasks).await;
+    
+    // Build results map using compact JSON (matching Python's approach)
+    // Keys are ordered alphabetically: options, url
+    let mut http_results = HashMap::new();
+    for (req, result) in http_requests.iter().zip(results.iter()) {
+        let key = serde_json::json!({
+            "options": req.options,
+            "url": req.url,
+        });
+        let key_str = serde_json::to_string(&key)
+            .map_err(|e| format!("Failed to serialize request key: {}", e))?;
+        let result_value = serde_json::json!({
+            "ok": result.ok,
+            "status": result.status,
+            "statusText": result.status_text,
+            "headers": result.headers,
+            "data": result.data,
+        });
+        http_results.insert(key_str, result_value);
+    }
+    
+    // SECOND PASS: Execute with cached results
+    let runtime2 = AsyncRuntime::new().map_err(|e| format!("Runtime error: {}", e))?;
+    let context2 = AsyncContext::full(&runtime2).await.map_err(|e| format!("Context error: {}", e))?;
+    
+    // Inject INPUTS object
+    context2.with(|ctx| {
+        ctx.eval::<(), _>(format!("var INPUTS = {};", inputs_json))
+            .map_err(|e| format!("INPUTS injection error: {}", e))
+    }).await?;
+    
+    // Setup httpGet to return cached results
+    let results_json = serde_json::to_string(&http_results).map_err(|e| e.to_string())?;
+    context2.with(|ctx| {
+        ctx.eval::<(), _>(format!("var __httpResults = {};", results_json))
+            .map_err(|e| format!("Failed to inject results: {:?}", e))?;
         
-        // Evaluate and get the promise
-        let promise: rquickjs::Promise = ctx.eval(wrapped_code.as_str())
-            .map_err(|e| format!("Evaluation error: {:?}", e))?;
-        
-        // Await the promise to get the result
-        let result = promise.into_future::<rquickjs::Value>().await
-            .map_err(|e| format!("Promise resolution error: {:?}", e))?;
-        
-        // Store and stringify result
-        ctx.globals().set("__result", result)
-            .map_err(|e| format!("Set result error: {:?}", e))?;
-        
-        let json_str: String = ctx.eval("JSON.stringify(__result)")
-            .map_err(|e| format!("JSON stringify error: {:?}", e))?;
-        
-        Ok::<String, String>(json_str)
+        ctx.eval::<(), _>(r#"
+            function httpRequest(url, options) {
+                // Key format matches Python's: alphabetically sorted
+                var key = JSON.stringify({ options: options || {}, url: url });
+                return __httpResults[key];
+            }
+            function httpGet(url, options) {
+                return httpRequest(url, options);
+            }
+        "#).map_err(|e| format!("Failed to setup result lookup: {:?}", e))
+    }).await?;
+    
+    // Execute the code and return the result
+    let result_json = context2.with(|ctx| {
+        evaluate_and_stringify(&ctx, code)
+            .map_err(|e| format!("Evaluation error: {:?}", e))
     }).await?;
     
     serde_json::from_str(&result_json).map_err(|e| e.to_string())
